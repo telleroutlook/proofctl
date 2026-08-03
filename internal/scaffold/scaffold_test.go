@@ -354,6 +354,30 @@ func TestInit_Coq(t *testing.T) {
 	}
 }
 
+// TestInit_Isabelle verifies that Init for the isabelle domain writes graph.json,
+// policy file, MySession.thy, and ROOT.
+func TestInit_Isabelle(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	d, err := scaffold.Lookup("isabelle")
+	if err != nil {
+		t.Fatalf("Lookup(isabelle): %v", err)
+	}
+	if err := scaffold.Init(root, d); err != nil {
+		t.Fatalf("Init(isabelle): %v", err)
+	}
+	for _, rel := range []string{
+		"graph.json",
+		filepath.Join("policies", "isabelle-v1.json"),
+		"MySession.thy",
+		"ROOT",
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); os.IsNotExist(err) {
+			t.Errorf("Init(isabelle): expected file %q was not created", rel)
+		}
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

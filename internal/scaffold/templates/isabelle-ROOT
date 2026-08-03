@@ -1,0 +1,3 @@
+session MySession in "." = Main +
+  theories
+    MySession

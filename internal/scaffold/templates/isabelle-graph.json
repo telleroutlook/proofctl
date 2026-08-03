@@ -1,0 +1,28 @@
+{
+  "claims": [
+    {
+      "id": "thm-MySession-main",
+      "kind": "theorem",
+      "statement": {
+        "text": "Isabelle/HOL theorem: thm-MySession-main",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "evidence": [],
+      "checker_policy": "isabelle-checker-v1",
+      "batch_group": "isabelle-env"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "isabelle-checker-v1",
+      "protocol_version": 1,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {
+        "kind": "native",
+        "cmd": ["python3", "${PROOFCTL_ADAPTERS}/isabelle/bridge.py"]
+      }
+    }
+  ],
+  "evidence": []
+}

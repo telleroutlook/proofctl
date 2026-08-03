@@ -94,6 +94,16 @@ var KnownDomains = []Domain{
 			"_CoqProject": "templates/coq-_CoqProject",
 		},
 	},
+	{
+		Name:           "isabelle",
+		Description:    "Isabelle/HOL formal proof domain: verify sessions via isabelle build; uses BatchGroup for whole-session verification",
+		PolicyTemplate: "templates/isabelle-policy.json",
+		GraphTemplate:  "templates/isabelle-graph.json",
+		ExtraTemplates: map[string]string{
+			"MySession.thy": "templates/isabelle-MySession.thy",
+			"ROOT":          "templates/isabelle-ROOT",
+		},
+	},
 }
 
 // Lookup returns the Domain for name, or an error if unknown.
@@ -103,7 +113,7 @@ func Lookup(name string) (Domain, error) {
 			return d, nil
 		}
 	}
-	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt, lean, coq)", name)
+	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt, lean, coq, isabelle)", name)
 }
 
 // Init writes all scaffold files for domain into root.
