@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/telleroutlook/proofctl/internal/compile"
@@ -15,6 +16,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/policy"
 	"github.com/telleroutlook/proofctl/internal/release"
+	"github.com/telleroutlook/proofctl/internal/snapshot"
 	"github.com/telleroutlook/proofctl/internal/status"
 	"github.com/telleroutlook/proofctl/internal/weil"
 )
@@ -318,3 +320,294 @@ func indexString(s, substr string) int {
 	}
 	return -1
 }
+
+// claimsFromDAG converts []*ir.Claim to []ir.Claim for snapshot.Take.
+func claimsFromDAG(g *dag.DAG) []ir.Claim {
+	ptrs := g.Claims()
+	out := make([]ir.Claim, len(ptrs))
+	for i, c := range ptrs {
+		out[i] = *c
+	}
+	return out
+}
+
+// runWeilShadowPipeline runs the full init→compile→status→release pipeline
+// in an isolated temp dir and returns the graph, attestations, statuses,
+// and the DryRun result.
+func runWeilShadowPipeline(t *testing.T) (
+	g *dag.DAG,
+	atts map[string]*ir.Attestation,
+	statuses map[string]ir.Status,
+	pass bool,
+	blockers []string,
+	pol policy.ReleasePolicy,
+) {
+	t.Helper()
+	_, g, atts = setupWeilShadow(t)
+	statuses = status.Compute(g, atts)
+
+	polData, err := os.ReadFile("policies/weil-release-v1.json")
+	if err != nil {
+		t.Fatalf("read policy: %v", err)
+	}
+	if err := json.Unmarshal(polData, &pol); err != nil {
+		t.Fatalf("parse policy: %v", err)
+	}
+
+	gate := &release.Gate{OutputDir: t.TempDir()}
+	pass, blockers = gate.DryRun(g, atts, pol)
+	return
+}
+
+// TestPhase5ColdReplay runs the full pipeline twice in separate temp dirs
+// and asserts deterministic output across both runs.
+func TestPhase5ColdReplay(t *testing.T) {
+	t.Parallel()
+
+	const fixedTimestamp = "2026-01-01T00:00:00Z"
+
+	src, err := os.ReadFile(exampleGraphPath)
+	if err != nil {
+		t.Fatalf("read example graph: %v", err)
+	}
+
+	// --- Run 1 ---
+	dir1 := t.TempDir()
+	if err := config.Init(dir1); err != nil {
+		t.Fatalf("run1 config.Init: %v", err)
+	}
+	pg1, atts1, err := compileWeilAdapter(src)
+	if err != nil {
+		t.Fatalf("run1 compileWeilAdapter: %v", err)
+	}
+	graphOut1 := filepath.Join(dir1, config.DirName, config.GraphFile)
+	if err := writeJSONFile(graphOut1, pg1); err != nil {
+		t.Fatalf("run1 write graph.json: %v", err)
+	}
+
+	// --- Run 2 ---
+	dir2 := t.TempDir()
+	if err := config.Init(dir2); err != nil {
+		t.Fatalf("run2 config.Init: %v", err)
+	}
+	pg2, atts2, err := compileWeilAdapter(src)
+	if err != nil {
+		t.Fatalf("run2 compileWeilAdapter: %v", err)
+	}
+	graphOut2 := filepath.Join(dir2, config.DirName, config.GraphFile)
+	if err := writeJSONFile(graphOut2, pg2); err != nil {
+		t.Fatalf("run2 write graph.json: %v", err)
+	}
+
+	// 1. Assert graph.json is byte-identical between the two runs.
+	graph1Bytes, err := json.MarshalIndent(pg1, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal pg1: %v", err)
+	}
+	graph2Bytes, err := json.MarshalIndent(pg2, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal pg2: %v", err)
+	}
+	if !bytes.Equal(graph1Bytes, graph2Bytes) {
+		t.Error("phase5 cold replay: graph.json output differs between runs")
+	}
+
+	// 2. Assert every attestation file is byte-identical.
+	for claimID, att1 := range atts1 {
+		att2, ok := atts2[claimID]
+		if !ok {
+			t.Errorf("phase5 cold replay: attestation %q missing in run 2", claimID)
+			continue
+		}
+		b1, _ := json.MarshalIndent(att1, "", "  ")
+		b2, _ := json.MarshalIndent(att2, "", "  ")
+		if !bytes.Equal(b1, b2) {
+			t.Errorf("phase5 cold replay: attestation %q differs between runs", claimID)
+		}
+	}
+	if len(atts1) != len(atts2) {
+		t.Errorf("phase5 cold replay: attestation count differs: run1=%d run2=%d", len(atts1), len(atts2))
+	}
+
+	// Build DAGs for status and release checks.
+	g1 := dag.New()
+	for i := range pg1.Claims {
+		if err := g1.AddClaim(&pg1.Claims[i]); err != nil {
+			t.Fatalf("run1 AddClaim: %v", err)
+		}
+	}
+	if err := g1.Validate(); err != nil {
+		t.Fatalf("run1 Validate: %v", err)
+	}
+
+	g2 := dag.New()
+	for i := range pg2.Claims {
+		if err := g2.AddClaim(&pg2.Claims[i]); err != nil {
+			t.Fatalf("run2 AddClaim: %v", err)
+		}
+	}
+	if err := g2.Validate(); err != nil {
+		t.Fatalf("run2 Validate: %v", err)
+	}
+
+	// 3. Assert status output is identical.
+	statuses1 := status.Compute(g1, atts1)
+	statuses2 := status.Compute(g2, atts2)
+
+	if len(statuses1) != len(statuses2) {
+		t.Errorf("phase5 cold replay: status count differs: run1=%d run2=%d", len(statuses1), len(statuses2))
+	}
+	for id, s1 := range statuses1 {
+		s2, ok := statuses2[id]
+		if !ok {
+			t.Errorf("phase5 cold replay: status for %q missing in run 2", id)
+			continue
+		}
+		if s1 != s2 {
+			t.Errorf("phase5 cold replay: status for %q differs: run1=%q run2=%q", id, s1, s2)
+		}
+	}
+
+	// 4. Assert release DryRun result is identical (pass=false, same blockers set).
+	// Compare via EvaluateConditions for structured, deterministic comparison of
+	// which condition IDs fail — raw DryRun blocker strings contain map-iterated claim
+	// lists whose ordering is non-deterministic across runs.
+	polData, err := os.ReadFile("policies/weil-release-v1.json")
+	if err != nil {
+		t.Fatalf("read policy: %v", err)
+	}
+	var pol policy.ReleasePolicy
+	if err := json.Unmarshal(polData, &pol); err != nil {
+		t.Fatalf("parse policy: %v", err)
+	}
+
+	gate1 := &release.Gate{OutputDir: t.TempDir()}
+	pass1, _ := gate1.DryRun(g1, atts1, pol)
+
+	gate2 := &release.Gate{OutputDir: t.TempDir()}
+	pass2, _ := gate2.DryRun(g2, atts2, pol)
+
+	if pass1 != pass2 {
+		t.Errorf("phase5 cold replay: DryRun pass differs: run1=%v run2=%v", pass1, pass2)
+	}
+	if pass1 {
+		t.Error("phase5 cold replay: DryRun expected blocked in shadow mode, got pass")
+	}
+
+	// Compare failing condition IDs (which are deterministic, unlike claim-list strings).
+	conds1 := release.EvaluateConditions(g1, atts1, pol)
+	conds2 := release.EvaluateConditions(g2, atts2, pol)
+
+	var failedIDs1, failedIDs2 []string
+	for _, c := range conds1 {
+		if !c.Passed {
+			failedIDs1 = append(failedIDs1, string(c.ID))
+		}
+	}
+	for _, c := range conds2 {
+		if !c.Passed {
+			failedIDs2 = append(failedIDs2, string(c.ID))
+		}
+	}
+	sort.Strings(failedIDs1)
+	sort.Strings(failedIDs2)
+
+	failedSetsEqual := func() bool {
+		if len(failedIDs1) != len(failedIDs2) {
+			return false
+		}
+		for i := range failedIDs1 {
+			if failedIDs1[i] != failedIDs2[i] {
+				return false
+			}
+		}
+		return true
+	}()
+	if !failedSetsEqual {
+		t.Errorf("phase5 cold replay: failing condition sets differ:\n  run1=%v\n  run2=%v",
+			failedIDs1, failedIDs2)
+	}
+
+	// 5. Assert snapshot self-digest is identical between runs (fixed timestamp).
+	snap1, err := snapshot.Take(claimsFromDAG(g1), atts1, statuses1, fixedTimestamp)
+	if err != nil {
+		t.Fatalf("run1 snapshot.Take: %v", err)
+	}
+	snap2, err := snapshot.Take(claimsFromDAG(g2), atts2, statuses2, fixedTimestamp)
+	if err != nil {
+		t.Fatalf("run2 snapshot.Take: %v", err)
+	}
+
+	if snap1.SelfDigest != snap2.SelfDigest {
+		t.Errorf("phase5 cold replay: snapshot self-digest differs:\n  run1=%s\n  run2=%s",
+			snap1.SelfDigest, snap2.SelfDigest)
+	}
+}
+
+// TestPhase5ConditionResults evaluates the 13 structured conditions against
+// the Weil shadow integration and asserts the expected pass/fail pattern.
+func TestPhase5ConditionResults(t *testing.T) {
+	t.Parallel()
+
+	_, g, atts := setupWeilShadow(t)
+
+	polData, err := os.ReadFile("policies/weil-release-v1.json")
+	if err != nil {
+		t.Fatalf("read policy: %v", err)
+	}
+	var pol policy.ReleasePolicy
+	if err := json.Unmarshal(polData, &pol); err != nil {
+		t.Fatalf("parse policy: %v", err)
+	}
+
+	// Evaluate all 13 conditions.
+	conditions := release.EvaluateConditions(g, atts, pol)
+
+	// Build a map for easy lookup.
+	condMap := make(map[release.ConditionID]release.ConditionResult, len(conditions))
+	for _, c := range conditions {
+		condMap[c.ID] = c
+	}
+
+	// C01 must fail: no claims are accepted in shadow mode.
+	if c01, ok := condMap[release.CondGlobalStatusAccepted]; !ok {
+		t.Error("C01 result missing")
+	} else if c01.Passed {
+		t.Error("C01 expected FAIL (no accepted claims in shadow mode), got PASS")
+	}
+
+	// C02 must pass: shadow-review is not "assumption" assurance.
+	if c02, ok := condMap[release.CondAssumptionFootprintEmpty]; !ok {
+		t.Error("C02 result missing")
+	} else if !c02.Passed {
+		t.Errorf("C02 expected PASS (no assumption assurance), got FAIL: %s", c02.Blocker)
+	}
+
+	// C03 must fail: shadow-review is forbidden by the release policy.
+	if c03, ok := condMap[release.CondAllAssurancesAllowed]; !ok {
+		t.Error("C03 result missing")
+	} else if c03.Passed {
+		t.Error("C03 expected FAIL (shadow-review is forbidden), got PASS")
+	} else if !contains(c03.Blocker, "shadow-review") && !contains(c03.Blocker, "forbidden") {
+		t.Errorf("C03 blocker does not mention shadow-review or forbidden: %s", c03.Blocker)
+	}
+
+	// C13 must fail: shadow attestations have no freshness/replay data.
+	if c13, ok := condMap[release.CondReplayConsistency]; !ok {
+		t.Error("C13 result missing")
+	} else if c13.Passed {
+		t.Error("C13 expected FAIL (no freshness in shadow attestations), got PASS")
+	}
+
+	// AllPassed must return false.
+	if release.AllPassed(conditions) {
+		t.Error("AllPassed expected false, got true")
+	}
+
+	// Blockers must be non-empty.
+	blockerList := release.Blockers(conditions)
+	if len(blockerList) == 0 {
+		t.Error("Blockers() expected non-empty list, got empty")
+	}
+}
+

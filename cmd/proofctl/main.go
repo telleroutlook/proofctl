@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"context"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/policy"
 	"github.com/telleroutlook/proofctl/internal/release"
 	"github.com/telleroutlook/proofctl/internal/runner"
+	"github.com/telleroutlook/proofctl/internal/snapshot"
 	"github.com/telleroutlook/proofctl/internal/status"
 	"github.com/telleroutlook/proofctl/internal/verify"
 	weilpkg "github.com/telleroutlook/proofctl/internal/weil"
@@ -77,6 +79,8 @@ func main() {
 		cmdRelease(subargs, *jsonFlag)
 	case "status":
 		cmdStatus(subargs, *jsonFlag)
+	case "snapshot":
+		cmdSnapshot(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -101,6 +105,7 @@ Subcommands:
   impact    List claims that depend on a given claim
   cache     Manage the checker result cache
   release   Run the release gate
+  snapshot  Write a point-in-time snapshot of claims + statuses
   status    Print the current proof graph status
 
 Flags:
@@ -854,13 +859,22 @@ func cmdRelease(args []string, useJSON bool) {
 
 	gate := &release.Gate{OutputDir: filepath.Join(root, config.DirName)}
 
-	type releaseOutput struct {
-		Pass     bool     `json:"pass"`
-		Blockers []string `json:"blockers"`
-		Released bool     `json:"released"`
-		Defects  map[string]string `json:"defects,omitempty"`
-		CertifiedRadius interface{} `json:"certified_radius"`
+	type conditionEntry struct {
+		ID      string `json:"id"`
+		Passed  bool   `json:"passed"`
+		Blocker string `json:"blocker,omitempty"`
 	}
+	type releaseOutput struct {
+		Pass            bool             `json:"pass"`
+		Blockers        []string         `json:"blockers"`
+		Conditions      []conditionEntry `json:"conditions,omitempty"`
+		Released        bool             `json:"released"`
+		Defects         map[string]string `json:"defects,omitempty"`
+		CertifiedRadius interface{}      `json:"certified_radius"`
+	}
+
+	// Evaluate the 13 structured conditions.
+	conditions := release.EvaluateConditions(g, attestations, pol)
 
 	// Collect D-defect reasons for human output.
 	defects := collectDefects(attestations)
@@ -870,7 +884,17 @@ func cmdRelease(args []string, useJSON bool) {
 		if useJSON {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			out := releaseOutput{Pass: pass, Blockers: blockers, Released: false, CertifiedRadius: nil}
+			condEntries := make([]conditionEntry, len(conditions))
+			for i, c := range conditions {
+				condEntries[i] = conditionEntry{ID: string(c.ID), Passed: c.Passed, Blocker: c.Blocker}
+			}
+			out := releaseOutput{
+				Pass:       pass,
+				Blockers:   blockers,
+				Conditions: condEntries,
+				Released:   false,
+				CertifiedRadius: nil,
+			}
 			if len(defects) > 0 {
 				out.Defects = defects
 			}
@@ -880,9 +904,23 @@ func cmdRelease(args []string, useJSON bool) {
 		if pass {
 			fmt.Println("RELEASE DRY-RUN: PASS")
 		} else {
-			fmt.Printf("RELEASE DRY-RUN: BLOCKED\nBlockers (%d):\n", len(blockers)+len(defects))
-			for _, b := range blockers {
-				fmt.Printf("  [POLICY] %s\n", b)
+			fmt.Printf("RELEASE DRY-RUN: BLOCKED\n\n")
+			fmt.Printf("Conditions (%d):\n", len(conditions))
+			for _, c := range conditions {
+				mark := "PASS"
+				if !c.Passed {
+					mark = "FAIL"
+				}
+				if c.Blocker != "" {
+					fmt.Printf("  [%s] %s: %s\n", mark, c.ID, c.Blocker)
+				} else {
+					fmt.Printf("  [%s] %s\n", mark, c.ID)
+				}
+			}
+			fmt.Printf("\nBlockers (%d):\n", len(blockers)+len(defects))
+			condBlockers := release.Blockers(conditions)
+			for _, b := range condBlockers {
+				fmt.Printf("  %s\n", b)
 			}
 			for claimID, reason := range defects {
 				fmt.Printf("  [DEFECT] %s: %s\n", claimID, reason)
@@ -900,7 +938,17 @@ func cmdRelease(args []string, useJSON bool) {
 	if useJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		out := releaseOutput{Pass: pass, Blockers: blockers, Released: pass, CertifiedRadius: nil}
+		condEntries := make([]conditionEntry, len(conditions))
+		for i, c := range conditions {
+			condEntries[i] = conditionEntry{ID: string(c.ID), Passed: c.Passed, Blocker: c.Blocker}
+		}
+		out := releaseOutput{
+			Pass:       pass,
+			Blockers:   blockers,
+			Conditions: condEntries,
+			Released:   pass,
+			CertifiedRadius: nil,
+		}
 		if pass {
 			out.CertifiedRadius = pol.Target
 		}
@@ -915,7 +963,20 @@ func cmdRelease(args []string, useJSON bool) {
 		fmt.Println("PASS: release gate passed")
 		fmt.Printf("certified_radius: %s\n", pol.Target)
 	} else {
-		fmt.Printf("RELEASE BLOCKED\nBlockers (%d):\n", len(blockers)+len(defects))
+		fmt.Printf("RELEASE BLOCKED\n\n")
+		fmt.Printf("Conditions (%d):\n", len(conditions))
+		for _, c := range conditions {
+			mark := "PASS"
+			if !c.Passed {
+				mark = "FAIL"
+			}
+			if c.Blocker != "" {
+				fmt.Printf("  [%s] %s: %s\n", mark, c.ID, c.Blocker)
+			} else {
+				fmt.Printf("  [%s] %s\n", mark, c.ID)
+			}
+		}
+		fmt.Printf("\nBlockers (%d):\n", len(blockers)+len(defects))
 		for _, b := range blockers {
 			fmt.Printf("  [POLICY] %s\n", b)
 		}
@@ -924,6 +985,70 @@ func cmdRelease(args []string, useJSON bool) {
 		}
 		fmt.Println("\ncertified_radius: null")
 	}
+}
+
+// cmdSnapshot implements the snapshot subcommand.
+//
+// Usage:
+//
+//	proofctl snapshot [--output-dir <dir>]
+func cmdSnapshot(args []string, useJSON bool) {
+	fs := flag.NewFlagSet("snapshot", flag.ContinueOnError)
+	outputDirFlag := fs.String("output-dir", "", "directory for snapshot output (default: .proofctl/snapshots/)")
+	if err := fs.Parse(args); err != nil {
+		die(useJSON, errors.CodeInvalidInput, "snapshot: "+err.Error())
+	}
+
+	root, _, g, attestations := loadProjectGraph(useJSON)
+
+	// Determine output directory.
+	outputDir := *outputDirFlag
+	if outputDir == "" {
+		outputDir = filepath.Join(root, config.DirName, "snapshots")
+	}
+
+	// Compute statuses.
+	statuses := status.Compute(g, attestations)
+
+	// Convert []*ir.Claim to []ir.Claim for snapshot.Take.
+	claimPtrs := g.Claims()
+	claims := make([]ir.Claim, len(claimPtrs))
+	for i, c := range claimPtrs {
+		claims[i] = *c
+	}
+
+	// Take snapshot with current UTC timestamp.
+	createdAt := time.Now().UTC().Format(time.RFC3339)
+	snap, err := snapshot.Take(claims, attestations, statuses, createdAt)
+	if err != nil {
+		die(useJSON, errors.CodeInternalError, "snapshot take: "+err.Error())
+	}
+
+	// Write snapshot to disk.
+	path, err := snapshot.Write(snap, outputDir)
+	if err != nil {
+		die(useJSON, errors.CodeInternalError, "snapshot write: "+err.Error())
+	}
+
+	if useJSON {
+		type snapshotOutput struct {
+			Path      string `json:"path"`
+			Digest    string `json:"digest"`
+			Claims    int    `json:"claims"`
+			CreatedAt string `json:"created_at"`
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(snapshotOutput{
+			Path:      path,
+			Digest:    snap.SelfDigest,
+			Claims:    len(snap.Claims),
+			CreatedAt: snap.CreatedAt,
+		})
+		return
+	}
+
+	fmt.Printf("Snapshot written: %s  digest: %s\n", path, snap.SelfDigest)
 }
 
 // collectDefects returns a map of claim ID → block_reason for all blocked attestations.

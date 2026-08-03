@@ -26,6 +26,7 @@ type ReleaseStatus struct {
 	PolicyVersion   string            `json:"policy_version"`
 	Blockers        []string          `json:"blockers,omitempty"`
 	Defects         map[string]string `json:"defects,omitempty"` // D-number → block_reason
+	Conditions      []ConditionResult `json:"conditions,omitempty"`
 	Released        bool              `json:"released"`
 }
 
@@ -36,10 +37,11 @@ type Gate struct {
 
 // checkResult holds the outcome of the shared internal check.
 type checkResult struct {
-	pass     bool
-	blockers []string
-	statuses map[string]ir.Status
-	defects  map[string]string // claim ID → block_reason
+	pass       bool
+	blockers   []string
+	statuses   map[string]ir.Status
+	defects    map[string]string // claim ID → block_reason
+	conditions []ConditionResult
 }
 
 // check is the single shared implementation for DryRun and Release.
@@ -72,11 +74,16 @@ func (g *Gate) check(
 		}
 	}
 
+	// Evaluate the 13 Weil release conditions.
+	condResults := EvaluateConditions(graph, attestations, pol)
+	blockers = append(blockers, Blockers(condResults)...)
+
 	return checkResult{
-		pass:     len(blockers) == 0,
-		blockers: blockers,
-		statuses: statuses,
-		defects:  defects,
+		pass:       len(blockers) == 0,
+		blockers:   blockers,
+		statuses:   statuses,
+		defects:    defects,
+		conditions: condResults,
 	}
 }
 
@@ -106,6 +113,7 @@ func (g *Gate) Release(
 		PolicyVersion: pol.Version,
 		Blockers:      r.blockers,
 		Defects:       r.defects,
+		Conditions:    r.conditions,
 	}
 	if r.pass {
 		rs.CertifiedRadius = pol.Target

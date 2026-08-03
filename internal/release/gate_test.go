@@ -13,6 +13,7 @@ import (
 
 // makeTestGraph builds a minimal DAG with 2 claims and corresponding attestations
 // that satisfy a simple policy with no assurance constraints.
+// Attestations include all metadata and freshness fields required by C04-C13.
 func makeTestGraph(t *testing.T) (*dag.DAG, map[string]*ir.Attestation) {
 	t.Helper()
 	d := dag.New()
@@ -23,14 +24,31 @@ func makeTestGraph(t *testing.T) (*dag.DAG, map[string]*ir.Attestation) {
 	}
 	atts := map[string]*ir.Attestation{
 		"c1": {
-			ClaimID:   "c1",
-			Outcome:   string(ir.StatusAccepted),
-			Assurance: ir.AssuranceFormalKernel,
+			ClaimID:        "c1",
+			Outcome:        string(ir.StatusAccepted),
+			Assurance:      ir.AssuranceFormalKernel,
+			SelfDigest:     "sha256:aabbccdd00112233",
+			StartFreshness: "sha256:start1",
+			EndFreshness:   "sha256:end1",
+			Metadata: map[string]string{
+				"cap_format_version": "v2",
+				"digests_fresh":      "true",
+				"path_keys_match":    "true",
+				"intervals_intersect": "true",
+				"matrix_reconstructed": "true",
+				"ldlt_passes":        "true",
+				"odd_sector_passes":  "true",
+				"even_sector_passes": "true",
+				"pivot_radius_ratio": "150",
+			},
 		},
 		"c2": {
-			ClaimID:   "c2",
-			Outcome:   string(ir.StatusAccepted),
-			Assurance: ir.AssuranceFormalKernel,
+			ClaimID:        "c2",
+			Outcome:        string(ir.StatusAccepted),
+			Assurance:      ir.AssuranceFormalKernel,
+			SelfDigest:     "sha256:eeff99887766554433221100",
+			StartFreshness: "sha256:start2",
+			EndFreshness:   "sha256:end2",
 		},
 	}
 	return d, atts
