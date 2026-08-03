@@ -63,10 +63,10 @@ func cmdCasImport(args []string, useJSON bool) {
 	}
 
 	type importResult struct {
-		File   string `json:"file"`
-		Digest string `json:"digest"`
-		Size   int64  `json:"size"`
-		Updated bool  `json:"size_updated"`
+		File    string `json:"file"`
+		Digest  string `json:"digest"`
+		Size    int64  `json:"size"`
+		Updated bool   `json:"size_updated"`
 	}
 	var results []importResult
 

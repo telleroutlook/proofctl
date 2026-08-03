@@ -283,13 +283,14 @@ func TestReleaseTwiceOverwrites(t *testing.T) {
 		t.Error("expected second Release to overwrite with released=false")
 	}
 
-	// No leftover temp files should exist.
+	// No leftover temp files should exist (STATUS.json and release-snapshot.json are expected).
+	knownFiles := map[string]bool{StatusFile: true, SnapshotFile: true}
 	entries, err := os.ReadDir(outDir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
 	for _, e := range entries {
-		if e.Name() != StatusFile {
+		if !knownFiles[e.Name()] {
 			t.Errorf("unexpected leftover file in OutputDir: %q", e.Name())
 		}
 	}

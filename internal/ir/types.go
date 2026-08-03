@@ -69,9 +69,9 @@ type CheckerIdentity struct {
 
 // Runtime describes how a checker is executed.
 type Runtime struct {
-	Kind string   `json:"kind"`            // "oci" | "native" | "wasi"
-	Cmd  []string `json:"cmd,omitempty"`   // for "native": [interpreter, script, args...]
-	Digest string `json:"digest,omitempty"`
+	Kind   string   `json:"kind"`          // "oci" | "native" | "wasi"
+	Cmd    []string `json:"cmd,omitempty"` // for "native": [interpreter, script, args...]
+	Digest string   `json:"digest,omitempty"`
 }
 
 // Status values for a claim.

@@ -19,6 +19,7 @@
 //	release   Run the release gate
 //	status    Print the current proof graph status
 //	snapshot  Write a point-in-time snapshot of claims + statuses
+//	doctor    Check that the proofctl environment is ready
 package main
 
 import (
@@ -37,10 +38,19 @@ import (
 	"github.com/telleroutlook/proofctl/internal/policy"
 )
 
+// version is set at build time via -ldflags "-X main.version=vX.Y.Z".
+var version = "dev"
+
 func main() {
 	jsonFlag := flag.Bool("json", false, "output in JSON format")
+	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Usage = usage
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Println("proofctl", version)
+		return
+	}
 
 	args := flag.Args()
 	if len(args) == 0 {
@@ -86,6 +96,8 @@ func main() {
 		cmdStatus(subargs, *jsonFlag)
 	case "snapshot":
 		cmdSnapshot(subargs, *jsonFlag)
+	case "doctor":
+		cmdDoctor(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -100,7 +112,8 @@ Usage:
   proofctl [--json] <subcommand> [args...]
 
 Subcommands:
-  init      Initialize a new proof graph project
+  init      Initialize a new proof graph project (--domain cap|lrat|qmd)
+  domains   List known domains (domains list)
   compile   Compile a proof source file to ProofGraph IR
   check     Run checkers for one or more claims
   verify    Verify attestation integrity
@@ -109,12 +122,18 @@ Subcommands:
   frontier  List unresolved direct dependencies of a claim
   impact    List claims that depend on a given claim
   cache     Manage the checker result cache
+  cas       Manage the content-addressed store (import|list)
+  pin       Pin a checker binary digest and command (pin checker --cmd ...)
+  env       Manage checker runtime environment (verify|snapshot)
+  replay    Cold-start generator+checker replay for a claim
   release   Run the release gate
   snapshot  Write a point-in-time snapshot of claims + statuses
+  doctor    Check that the proofctl environment is ready (PATH, project, checker, CAS)
   status    Print the current proof graph status
 
 Flags:
-  --json    Output in JSON format`)
+  --json      Output in JSON format
+  --version   Print version and exit`)
 }
 
 // die prints an error and exits with code 1.

@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -84,6 +85,10 @@ type NativeRunner struct {
 	// the current process environment. Used in tests to inject helper-process
 	// guards without spawning unrelated subprocesses.
 	Env []string
+	// ProjectRoot, if non-empty, is used as the base for resolving relative
+	// paths in Runtime.Cmd entries. ${VAR} placeholders are expanded via
+	// os.Getenv before path resolution.
+	ProjectRoot string
 }
 
 // DefaultTimeout is the default wall-clock timeout for NativeRunner.
@@ -115,9 +120,17 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 	var argv []string
 	var digestTarget string // file whose digest is verified
 	if len(checkerID.Runtime.Cmd) > 0 {
-		argv = checkerID.Runtime.Cmd
+		resolved, err := r.resolveCmdPaths(checkerID.Runtime.Cmd)
+		if err != nil {
+			return nil, &RunError{
+				Code:    ExitUnavailable,
+				Stderr:  err.Error(),
+				Wrapped: err,
+			}
+		}
+		argv = resolved
 		// Verify digest of the last element (the script), not the interpreter.
-		digestTarget = checkerID.Runtime.Cmd[len(checkerID.Runtime.Cmd)-1]
+		digestTarget = argv[len(argv)-1]
 	} else {
 		binPath, err := lookup(checkerID.ID)
 		if err != nil {
@@ -228,6 +241,33 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	return b.Buffer.Write(p)
+}
+
+// resolveCmdPaths expands ${VAR} placeholders and resolves relative paths in
+// a Runtime.Cmd slice. The first element (interpreter) is resolved via exec.LookPath
+// if it contains no path separator; subsequent elements that are not flags (not
+// starting with '-') are resolved relative to ProjectRoot when they are not absolute.
+func (r *NativeRunner) resolveCmdPaths(cmd []string) ([]string, error) {
+	out := make([]string, len(cmd))
+	for i, elem := range cmd {
+		// Expand ${VAR} and $VAR placeholders.
+		expanded := os.Expand(elem, os.Getenv)
+		if i == 0 {
+			// Interpreter: if it contains no separator, leave for exec to resolve.
+			out[i] = expanded
+		} else {
+			// Script / arg: resolve relative paths against ProjectRoot.
+			if r.ProjectRoot != "" && expanded != "" && !strings.HasPrefix(expanded, "-") && !filepath.IsAbs(expanded) {
+				abs := filepath.Join(r.ProjectRoot, expanded)
+				if _, err := os.Stat(abs); err != nil {
+					return nil, fmt.Errorf("runner: cmd[%d]: path %q not found (root: %s)", i, expanded, r.ProjectRoot)
+				}
+				expanded = abs
+			}
+			out[i] = expanded
+		}
+	}
+	return out, nil
 }
 
 // verifyBinaryDigest computes the SHA256 digest of the file at path and

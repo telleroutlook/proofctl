@@ -44,7 +44,7 @@ func cmdVerify(args []string, useJSON bool) {
 	}
 
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
-	nr := &runner.NativeRunner{}
+	nr := &runner.NativeRunner{ProjectRoot: root}
 	pipe := &verify.Pipeline{
 		DAG:       g,
 		CAS:       store,
