@@ -16,10 +16,10 @@ import (
 
 // doctorCheck is a single environment check result.
 type doctorCheck struct {
-	Name    string `json:"name"`
-	OK      bool   `json:"ok"`
-	Detail  string `json:"detail"`
-	Fix     string `json:"fix,omitempty"`
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"`
 }
 
 func cmdDoctor(args []string, useJSON bool) {

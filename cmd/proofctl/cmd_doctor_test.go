@@ -48,8 +48,8 @@ func TestDoctor_JSON_OutsideProject(t *testing.T) {
 		t.Fatal("expected JSON output, got empty string")
 	}
 	var out struct {
-		OK     bool              `json:"ok"`
-		Checks []map[string]any  `json:"checks"`
+		OK     bool             `json:"ok"`
+		Checks []map[string]any `json:"checks"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("doctor --json: invalid JSON: %v\noutput: %q", err, stdout)

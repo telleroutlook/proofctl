@@ -104,8 +104,8 @@ func TestRelease_WritesManifestWithEvidence(t *testing.T) {
 		RequiredClaims: []string{"c1"},
 	}
 	evidence := []ir.EvidenceDescriptor{{
-		Digest:   certDigest,
-		PathHint: "certs/primary.json",
+		Digest:    certDigest,
+		PathHint:  "certs/primary.json",
 		MediaType: "application/json",
 	}}
 
