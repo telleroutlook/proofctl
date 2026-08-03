@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/telleroutlook/proofctl/internal/cas"
@@ -80,7 +81,8 @@ func (p *Pipeline) Run(
 	// 2. Verify evidence via CAS.
 	for _, desc := range evidence {
 		if err := p.CAS.Verify(desc); err != nil {
-			return nil, proofErr.Newf(proofErr.CodeMissingEvidence, "evidence %s: %v", desc.Digest, err)
+			return nil, proofErr.Newf(proofErr.CodeMissingEvidence,
+				"claim %q: evidence %s: %v", claimID, desc.Digest, err)
 		}
 	}
 
@@ -90,6 +92,11 @@ func (p *Pipeline) Run(
 	// 4. Check attestation cache.
 	if hit, err := p.loadCachedAttestation(claimID, cacheKey); err == nil && hit != nil {
 		return &Result{Attestation: hit, CacheHit: true, CacheKey: cacheKey}, nil
+	} else if err != nil && isSigInvalidError(err) {
+		// Signature verification failed on the cached attestation — surface the error
+		// rather than silently re-running the checker, which would mask tampering.
+		return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
+			"claim %q: cached attestation signature invalid: %v", claimID, err)
 	}
 
 	// 5. Pre-run freshness snapshot.
@@ -336,9 +343,11 @@ func (p *Pipeline) verifyAttestationSig(att *ir.Attestation) error {
 		if e.IsDir() || len(e.Name()) < 4 || e.Name()[len(e.Name())-4:] != ".pub" {
 			continue
 		}
-		k, err := signing.LoadPublic(filepath.Join(p.TrustStore, e.Name()))
+		pubPath := filepath.Join(p.TrustStore, e.Name())
+		k, err := signing.LoadPublic(pubPath)
 		if err != nil {
-			continue
+			// A corrupt or unreadable key file is a configuration error, not a missing key.
+			return fmt.Errorf("load public key %s: %w", pubPath, err)
 		}
 		if k.ID != att.Signature.PubkeyFingerprint {
 			continue
@@ -389,4 +398,9 @@ func isRunError(err error, target **runner.RunError) bool {
 		return true
 	}
 	return false
+}
+
+// isSigInvalidError reports whether err originated from a signature verification failure.
+func isSigInvalidError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "signature-invalid")
 }

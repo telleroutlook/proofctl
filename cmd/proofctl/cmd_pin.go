@@ -102,7 +102,13 @@ func cmdPinChecker(args []string, useJSON bool) {
 		break
 	}
 	if !updated {
-		die(useJSON, errors.CodeInvalidInput, fmt.Sprintf("pin checker: checker %q not found in graph", targetID))
+		available := make([]string, len(pg.Checkers))
+		for i, ch := range pg.Checkers {
+			available[i] = ch.ID
+		}
+		die(useJSON, errors.CodeInvalidInput, fmt.Sprintf(
+			"pin checker: checker %q not found in graph (available: %s)",
+			targetID, strings.Join(available, ", ")))
 	}
 
 	// Write back to graph source.

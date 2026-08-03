@@ -66,7 +66,9 @@ func cmdEnvVerify(args []string, useJSON bool) {
 		checkerBin := strings.Fields(lock.Checker)[0]
 		out, err := exec.Command(checkerBin, "--version").CombinedOutput()
 		found := ""
-		if err == nil {
+		if err != nil {
+			found = fmt.Sprintf("[ERROR: cannot run %s: %v]", checkerBin, err)
+		} else {
 			found = strings.TrimSpace(string(out))
 		}
 		match := found == lock.PythonVersion
@@ -138,6 +140,8 @@ func cmdEnvSnapshot(args []string, useJSON bool) {
 	checkerBin := strings.Fields(*checkerFlag)[0]
 	if out, err := exec.Command(checkerBin, "--version").CombinedOutput(); err == nil {
 		lock.PythonVersion = strings.TrimSpace(string(out))
+	} else {
+		fmt.Fprintf(os.Stderr, "warn: cannot get version from %s: %v — python_version not recorded in snapshot\n", checkerBin, err)
 	}
 
 	// Get installed packages via pip freeze.
@@ -156,6 +160,8 @@ func cmdEnvSnapshot(args []string, useJSON bool) {
 				lock.Packages[pkg] = ver
 			}
 		}
+	} else {
+		fmt.Fprintf(os.Stderr, "warn: cannot run %s freeze: %v — packages not recorded in snapshot\n", pipBin, err)
 	}
 
 	data, _ := json.MarshalIndent(lock, "", "  ")
@@ -166,22 +172,37 @@ func cmdEnvSnapshot(args []string, useJSON bool) {
 
 	if useJSON {
 		enc := json.NewEncoder(os.Stdout)
-		_ = enc.Encode(map[string]string{"written": *outFlag, "checker": *checkerFlag})
+		_ = enc.Encode(map[string]any{
+			"written":        *outFlag,
+			"checker":        *checkerFlag,
+			"python_version": lock.PythonVersion,
+			"package_count":  len(lock.Packages),
+		})
 		return
+	}
+	pkgNote := fmt.Sprintf("%d recorded", len(lock.Packages))
+	if len(lock.Packages) == 0 {
+		pkgNote = "0 recorded (pip freeze may have failed — check warnings above)"
 	}
 	fmt.Printf("Snapshot written to %s\n", *outFlag)
 	fmt.Printf("Python: %s\n", lock.PythonVersion)
-	fmt.Printf("Packages: %d recorded\n", len(lock.Packages))
+	fmt.Printf("Packages: %s\n", pkgNote)
 	fmt.Printf("Run 'proofctl env verify --lock %s' to check the environment.\n", *outFlag)
 }
 
 // pipShowVersion returns the installed version of pkg by running pip show,
 // using the pip binary derived from the checker path.
+// Returns "[pip-error: ...]" if pip cannot be run, so the caller can distinguish
+// a broken pip from a genuinely absent package.
 func pipShowVersion(checker, pkg string) string {
 	pipBin := derivePip(checker)
 	out, err := exec.Command(pipBin, "show", pkg).Output()
 	if err != nil {
-		return ""
+		// Distinguish "package not installed" (exit 1, no output) from "pip broken".
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 && len(out) == 0 {
+			return ""
+		}
+		return fmt.Sprintf("[pip-error: cannot run %s show %s: %v]", pipBin, pkg, err)
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		if strings.HasPrefix(strings.ToLower(line), "version:") {

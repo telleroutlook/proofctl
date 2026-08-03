@@ -35,7 +35,7 @@ func cmdCompile(args []string, useJSON bool) {
 	srcFile := fs.Arg(0)
 	src, err := os.ReadFile(srcFile)
 	if err != nil {
-		die(useJSON, errors.CodeInvalidInput, "cannot read source file: "+err.Error())
+		die(useJSON, errors.CodeInvalidInput, fmt.Sprintf("cannot read source file %s: %v", srcFile, err))
 	}
 
 	// --fix-digests: compute sha256(statement.text) for any all-zero digest, rewrite the source file.
@@ -48,7 +48,7 @@ func cmdCompile(args []string, useJSON bool) {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		die(useJSON, errors.CodeInternalError, err.Error())
+		die(useJSON, errors.CodeInternalError, "getcwd: "+err.Error())
 	}
 	root, err := config.Find(cwd)
 	if err != nil {

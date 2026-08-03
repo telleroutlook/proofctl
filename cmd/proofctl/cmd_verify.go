@@ -41,7 +41,7 @@ func cmdVerify(args []string, useJSON bool) {
 	casRoot := filepath.Join(root, config.DirName, config.CASDir)
 	store, err := cas.New(casRoot)
 	if err != nil {
-		die(useJSON, errors.CodeInternalError, "cannot open CAS: "+err.Error())
+		die(useJSON, errors.CodeInternalError, fmt.Sprintf("cannot open CAS at %s: %v", casRoot, err))
 	}
 
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
@@ -156,7 +156,14 @@ func cmdVerify(args []string, useJSON bool) {
 		// Map results by claim ID; write attestations.
 		resultByID := make(map[string]verifyResult, len(claimResults))
 		attestDir := filepath.Join(root, config.DirName, config.AttestDir)
-		os.MkdirAll(attestDir, 0o755)
+		if mkErr := os.MkdirAll(attestDir, 0o755); mkErr != nil {
+			out := make([]verifyResult, len(groupClaims))
+			for i, c := range groupClaims {
+				out[i] = verifyResult{ClaimID: c.ID, Outcome: "error",
+					Error: fmt.Sprintf("cannot create attestation dir %s: %v", attestDir, mkErr)}
+			}
+			return out
+		}
 		for _, cr := range claimResults {
 			outcome := "rejected"
 			if cr.OK {
@@ -168,8 +175,18 @@ func cmdVerify(args []string, useJSON bool) {
 				Assurance: ir.Assurance(cr.Assurance),
 				Metadata:  cr.Metadata,
 			}
-			data, _ := json.MarshalIndent(att, "", "  ")
-			os.WriteFile(filepath.Join(attestDir, cr.ClaimID+".json"), append(data, '\n'), 0o644)
+			data, marshalErr := json.MarshalIndent(att, "", "  ")
+			if marshalErr != nil {
+				resultByID[cr.ClaimID] = verifyResult{ClaimID: cr.ClaimID, Outcome: "error",
+					Error: fmt.Sprintf("marshal attestation for %s: %v", cr.ClaimID, marshalErr)}
+				continue
+			}
+			attPath := filepath.Join(attestDir, cr.ClaimID+".json")
+			if writeErr := os.WriteFile(attPath, append(data, '\n'), 0o644); writeErr != nil {
+				resultByID[cr.ClaimID] = verifyResult{ClaimID: cr.ClaimID, Outcome: "error",
+					Error: fmt.Sprintf("write attestation %s: %v", attPath, writeErr)}
+				continue
+			}
 			resultByID[cr.ClaimID] = verifyResult{
 				ClaimID:   cr.ClaimID,
 				Outcome:   outcome,

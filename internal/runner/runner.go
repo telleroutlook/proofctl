@@ -176,8 +176,8 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 		// Context deadline exceeded → unavailable.
 		if ctx.Err() != nil {
 			return nil, &RunError{
-				Code:    ExitUnavailable,
-				Stderr:  "timeout",
+				Code:   ExitUnavailable,
+				Stderr: fmt.Sprintf("checker %q timed out after %v", checkerID.ID, timeout),
 				Wrapped: ctx.Err(),
 			}
 		}
@@ -197,7 +197,7 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 				}
 			}
 		}
-		return nil, &RunError{Code: ExitUnavailable, Stderr: stderrStr, Wrapped: runErr}
+		return nil, &RunError{Code: ExitUnavailable, Stderr: fmt.Sprintf("checker %q: %v", checkerID.ID, runErr), Wrapped: runErr}
 	}
 
 	out := stdoutBuf.Bytes()
@@ -205,18 +205,24 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 	// Cap check.
 	if len(out) > MaxOutputBytes {
 		return nil, &RunError{
-			Code:    ExitProtocolError,
-			Stderr:  stderrStr,
-			Wrapped: fmt.Errorf("checker %q output too large (%d bytes)", checkerID.ID, len(out)),
+			Code:   ExitProtocolError,
+			Stderr: stderrStr,
+			Wrapped: fmt.Errorf("checker %q output too large (%d bytes, limit %d bytes = %d MB)",
+				checkerID.ID, len(out), MaxOutputBytes, MaxOutputBytes/(1024*1024)),
 		}
 	}
 
 	// Validate stdout is valid JSON.
 	if !json.Valid(out) {
+		sample := out
+		if len(sample) > 256 {
+			sample = sample[:256]
+		}
 		return nil, &RunError{
-			Code:    ExitProtocolError,
-			Stderr:  stderrStr,
-			Wrapped: fmt.Errorf("checker %q produced non-JSON output", checkerID.ID),
+			Code:   ExitProtocolError,
+			Stderr: stderrStr,
+			Wrapped: fmt.Errorf("checker %q produced non-JSON output (first %d bytes): %q",
+				checkerID.ID, len(sample), sample),
 		}
 	}
 
@@ -322,12 +328,12 @@ func (r *NativeRunner) RunBatch(
 	}
 
 	if !protocol.IsBatchOutput(outputBytes) {
-		return nil, fmt.Errorf("runner: checker did not return batch output (missing 'claims' field)")
+		return nil, fmt.Errorf("runner: checker %q did not return batch output (missing 'claims' field)", checkerID.ID)
 	}
 
 	var batch protocol.BatchResult
 	if jsonErr := json.Unmarshal(outputBytes, &batch); jsonErr != nil {
-		return nil, fmt.Errorf("runner: parse batch result: %w", jsonErr)
+		return nil, fmt.Errorf("runner: checker %q batch result parse error: %w", checkerID.ID, jsonErr)
 	}
 	return batch.Claims, nil
 }

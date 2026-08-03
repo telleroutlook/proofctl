@@ -238,11 +238,11 @@ func loadAttestations(root string, useJSON bool) map[string]*ir.Attestation {
 func loadPolicy(path string, useJSON bool) policy.ReleasePolicy {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		die(useJSON, errors.CodeInvalidInput, "cannot read policy file: "+err.Error())
+		die(useJSON, errors.CodeInvalidInput, fmt.Sprintf("cannot read policy file %s: %v", path, err))
 	}
 	var pol policy.ReleasePolicy
 	if err := json.Unmarshal(data, &pol); err != nil {
-		die(useJSON, errors.CodeInvalidInput, "cannot parse policy file: "+err.Error())
+		die(useJSON, errors.CodeInvalidInput, fmt.Sprintf("cannot parse policy file %s: %v", path, err))
 	}
 	return pol
 }

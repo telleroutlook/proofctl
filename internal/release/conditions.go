@@ -158,7 +158,17 @@ func checkC04ReplayConsistency(graph *dag.DAG, attestations map[string]*ir.Attes
 			continue
 		}
 		if att.SelfDigest == "" || att.StartFreshness == "" || att.EndFreshness == "" {
-			missing = append(missing, fmt.Sprintf("%s(missing freshness/digest)", c.ID))
+			var absent []string
+			if att.SelfDigest == "" {
+				absent = append(absent, "self_digest")
+			}
+			if att.StartFreshness == "" {
+				absent = append(absent, "start_freshness")
+			}
+			if att.EndFreshness == "" {
+				absent = append(absent, "end_freshness")
+			}
+			missing = append(missing, fmt.Sprintf("%s(missing: %s)", c.ID, strings.Join(absent, ", ")))
 		}
 	}
 	if len(missing) > 0 {
