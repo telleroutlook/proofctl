@@ -610,4 +610,3 @@ func TestPhase5ConditionResults(t *testing.T) {
 		t.Error("Blockers() expected non-empty list, got empty")
 	}
 }
-

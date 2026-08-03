@@ -33,8 +33,8 @@ const (
 
 // Resource limit constants.
 const (
-	MaxOutputBytes = 16 * 1024 * 1024  // 16 MB
-	MaxStderrBytes = 64 * 1024         // 64 KB
+	MaxOutputBytes = 16 * 1024 * 1024 // 16 MB
+	MaxStderrBytes = 64 * 1024        // 64 KB
 	MaxWallClock   = 10 * time.Minute
 )
 
@@ -80,6 +80,10 @@ type NativeRunner struct {
 	LookupPath func(id string) (string, error)
 	// Timeout overrides the default wall-clock timeout. Zero means DefaultTimeout.
 	Timeout time.Duration
+	// Env, if non-nil, sets the subprocess environment instead of inheriting
+	// the current process environment. Used in tests to inject helper-process
+	// guards without spawning unrelated subprocesses.
+	Env []string
 }
 
 // DefaultTimeout is the default wall-clock timeout for NativeRunner.
@@ -124,6 +128,9 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 	//nolint:gosec // Native runner is dev-only; binary path is resolved via lookup.
 	cmd := exec.CommandContext(ctx, binPath)
 	cmd.Stdin = input
+	if r.Env != nil {
+		cmd.Env = r.Env
+	}
 
 	// Cap stdout at MaxOutputBytes+1 to detect overflow.
 	var stdoutBuf limitedBuffer
@@ -170,8 +177,8 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 	// Cap check.
 	if len(out) > MaxOutputBytes {
 		return nil, &RunError{
-			Code:   ExitProtocolError,
-			Stderr: stderrStr,
+			Code:    ExitProtocolError,
+			Stderr:  stderrStr,
 			Wrapped: fmt.Errorf("checker %q output too large (%d bytes)", checkerID.ID, len(out)),
 		}
 	}

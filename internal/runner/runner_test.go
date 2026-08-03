@@ -4,18 +4,74 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/telleroutlook/proofctl/internal/ir"
+	"github.com/telleroutlook/proofctl/pkg/protocol"
 )
 
-// zeroDigest is the all-zeros dev-placeholder digest.
-const zeroDigest = "sha256:" + "0000000000000000000000000000000000000000000000000000000000000000"
+// TestMain implements the helper-process pattern so that tests can use
+// os.Executable() as a fake checker binary without triggering infinite
+// subprocess recursion.
+//
+// When a test spawns the test binary as a subprocess it sets
+// GO_WANT_HELPER_PROCESS=1 in the subprocess environment.  TestMain detects
+// this flag, runs the requested helper, and exits immediately — it never
+// reaches testing.M.Run(), so no tests are executed recursively.
+//
+// Two helper modes are supported via GO_HELPER_MODE:
+//
+//	"accepted"  — emit a valid CheckerOutput{outcome:"accepted"} and exit 0
+//	"fail"      — emit a valid CheckerOutput{outcome:"rejected"} and exit 1
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		os.Exit(m.Run())
+	}
+	// Helper-process mode: act as a minimal fake checker and exit.
+	mode := os.Getenv("GO_HELPER_MODE")
+	out := protocol.CheckerOutput{
+		ProtocolVersion: protocol.ProtocolVersion,
+		ClaimID:         "test-claim",
+		Outcome:         "accepted",
+		Assurance:       string(ir.AssuranceDeterministicCAP),
+	}
+	if mode == "fail" {
+		out.Outcome = "rejected"
+	}
+	data, _ := json.Marshal(out)
+	fmt.Printf("%s\n", data)
+	if mode == "fail" {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
 
-// computeFileDigest computes the sha256 digest of the file at path, returning
-// it in "sha256:<hex>" form.
+// helperEnv returns the environment slice that makes the test binary behave as
+// a fake checker in the given mode ("accepted" or "fail").
+func helperEnv(mode string) []string {
+	return []string{
+		"GO_WANT_HELPER_PROCESS=1",
+		"GO_HELPER_MODE=" + mode,
+	}
+}
+
+// realBinaryPath returns the path to the currently running test binary.
+// Safe to use as a fake checker path because TestMain exits immediately when
+// GO_WANT_HELPER_PROCESS=1 is set; there is no infinite subprocess recursion.
+func realBinaryPath(t *testing.T) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	return exe
+}
+
+// computeFileDigest computes the sha256 digest of the file at path.
 func computeFileDigest(t *testing.T, path string) string {
 	t.Helper()
 	f, err := os.Open(path)
@@ -26,27 +82,41 @@ func computeFileDigest(t *testing.T, path string) string {
 	h := sha256.New()
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := f.Read(buf)
+		n, readErr := f.Read(buf)
 		if n > 0 {
 			h.Write(buf[:n])
 		}
-		if err != nil {
+		if readErr != nil {
 			break
 		}
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
-// realBinaryPath returns the path to a binary that exists on disk for use
-// as a fake checker path. We use the test binary itself.
-func realBinaryPath(t *testing.T) string {
-	t.Helper()
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatalf("os.Executable: %v", err)
+// zeroDigest is the all-zeros dev-placeholder digest.
+const zeroDigest = "sha256:" + "0000000000000000000000000000000000000000000000000000000000000000"
+
+// newHelper returns a NativeRunner that resolves any checker ID to the test
+// binary itself, injecting the helper-process environment so the binary exits
+// immediately rather than recursing.
+func newHelper(mode string) *NativeRunner {
+	exe, _ := os.Executable()
+	return &NativeRunner{
+		LookupPath: func(_ string) (string, error) { return exe, nil },
+		Env:        helperEnv(mode),
 	}
-	return exe
 }
+
+// checkerID builds a minimal CheckerIdentity for tests.
+func checkerID(id, digest string) ir.CheckerIdentity {
+	return ir.CheckerIdentity{
+		ID:              id,
+		ProtocolVersion: 1,
+		CheckerDigest:   digest,
+	}
+}
+
+// ── verifyBinaryDigest unit tests ────────────────────────────────────────────
 
 // TestVerifyBinaryDigest_Correct verifies that a matching digest returns nil.
 func TestVerifyBinaryDigest_Correct(t *testing.T) {
@@ -63,7 +133,6 @@ func TestVerifyBinaryDigest_Correct(t *testing.T) {
 func TestVerifyBinaryDigest_Wrong(t *testing.T) {
 	t.Parallel()
 	path := realBinaryPath(t)
-	// Use a digest that is syntactically valid but wrong.
 	wrong := "sha256:" + strings.Repeat("a", 64)
 	err := verifyBinaryDigest(path, wrong)
 	if err == nil {
@@ -104,66 +173,50 @@ func TestVerifyBinaryDigest_MissingFile(t *testing.T) {
 	}
 }
 
-// newNativeRunnerWithFixed returns a NativeRunner whose LookupPath always
-// resolves to the given fixed path (bypassing PATH lookup).
-func newNativeRunnerWithFixed(fixedPath string) *NativeRunner {
-	return &NativeRunner{
-		LookupPath: func(_ string) (string, error) {
-			return fixedPath, nil
-		},
-	}
-}
+// ── NativeRunner integration tests (helper-process pattern) ──────────────────
 
-// checkerID builds a CheckerIdentity with the given id and digest.
-func checkerID(id, digest string) ir.CheckerIdentity {
-	return ir.CheckerIdentity{
-		ID:              id,
-		ProtocolVersion: 1,
-		CheckerDigest:   digest,
-	}
-}
-
-// TestNativeRunner_DigestMatch verifies that when the binary digest matches,
-// the runner proceeds past the digest check. The binary won't be a valid
-// checker, so we expect a protocol-level error (not a digest mismatch error).
+// TestNativeRunner_DigestMatch verifies that a runner with the correct binary
+// digest passes the digest check and executes the checker (which here emits a
+// valid accepted output via the helper-process).
 func TestNativeRunner_DigestMatch(t *testing.T) {
 	t.Parallel()
 	path := realBinaryPath(t)
 	digest := computeFileDigest(t, path)
 
-	r := newNativeRunnerWithFixed(path)
-	_, err := r.Run(context.Background(), checkerID("test-checker", digest), nil)
-
-	// The binary is not a real checker, so we expect some error — but not a
-	// digest mismatch error.
+	r := &NativeRunner{
+		LookupPath: func(_ string) (string, error) { return path, nil },
+		Env:        helperEnv("accepted"),
+	}
+	res, err := r.Run(context.Background(), checkerID("test-checker", digest), nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "digest mismatch") {
-			t.Errorf("unexpected digest mismatch error (digest should match): %v", err)
+			t.Errorf("unexpected digest mismatch (digest should match): %v", err)
 		}
-		// Any other error (ExitProtocolError, ExitUnavailable from the binary's
-		// exit code, etc.) is acceptable — the point is the digest check passed.
+		// Other errors (protocol, unavailable) are acceptable in this test.
+		return
 	}
-	// err == nil is also acceptable if the binary happens to exit 0 with valid JSON.
+	// If no error, output must be valid JSON.
+	if !json.Valid(res) {
+		t.Errorf("expected valid JSON output, got: %s", res)
+	}
 }
 
-// TestNativeRunner_DigestMismatch verifies that when the binary digest does
-// not match, the runner returns a RunError containing "digest mismatch".
+// TestNativeRunner_DigestMismatch verifies that a wrong digest causes the
+// runner to return a RunError containing "digest mismatch" before executing
+// the binary.
 func TestNativeRunner_DigestMismatch(t *testing.T) {
 	t.Parallel()
-	path := realBinaryPath(t)
-	// A syntactically valid but incorrect digest (not all-zeros, so not a dev placeholder).
 	wrongDigest := "sha256:" + strings.Repeat("b", 64)
+	r := newHelper("accepted")
+	r.LookupPath = func(_ string) (string, error) { return realBinaryPath(t), nil }
 
-	r := newNativeRunnerWithFixed(path)
 	_, err := r.Run(context.Background(), checkerID("test-checker", wrongDigest), nil)
-
 	if err == nil {
 		t.Fatal("expected error for digest mismatch, got nil")
 	}
 	if !strings.Contains(err.Error(), "digest mismatch") {
 		t.Errorf("expected error to contain 'digest mismatch', got: %v", err)
 	}
-
 	var re *RunError
 	if ok := isRunError(err, &re); !ok {
 		t.Errorf("expected *RunError, got %T: %v", err, err)
@@ -173,23 +226,59 @@ func TestNativeRunner_DigestMismatch(t *testing.T) {
 }
 
 // TestNativeRunner_ZeroDigest_Allowed verifies that the all-zeros dev
-// placeholder digest does not trigger a mismatch error.
+// placeholder does not trigger a mismatch error, and that the helper-process
+// binary is actually executed (returning valid output) rather than recursing.
 func TestNativeRunner_ZeroDigest_Allowed(t *testing.T) {
 	t.Parallel()
-	path := realBinaryPath(t)
-
-	r := newNativeRunnerWithFixed(path)
-	_, err := r.Run(context.Background(), checkerID("test-checker", zeroDigest), nil)
-
-	// The binary is not a real checker, so we expect some error — but not a
-	// digest mismatch error.
-	if err != nil && strings.Contains(err.Error(), "digest mismatch") {
-		t.Errorf("zero digest should be allowed (dev mode), got: %v", err)
+	r := newHelper("accepted")
+	res, err := r.Run(context.Background(), checkerID("test-checker", zeroDigest), nil)
+	if err != nil {
+		if strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("zero digest should be allowed, got: %v", err)
+		}
+		return
+	}
+	if !json.Valid(res) {
+		t.Errorf("expected valid JSON output, got: %s", res)
 	}
 }
 
-// isRunError attempts to type-assert err to *RunError and writes the result
-// into dst. Returns true if successful.
+// TestNativeRunner_CheckerPass verifies the full happy path: helper exits 0
+// with a valid accepted CheckerOutput.
+func TestNativeRunner_CheckerPass(t *testing.T) {
+	t.Parallel()
+	r := newHelper("accepted")
+	res, err := r.Run(context.Background(), checkerID("test-checker", zeroDigest), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var out protocol.CheckerOutput
+	if jsonErr := json.Unmarshal(res, &out); jsonErr != nil {
+		t.Fatalf("unmarshal output: %v", jsonErr)
+	}
+	if out.Outcome != "accepted" {
+		t.Errorf("expected outcome 'accepted', got %q", out.Outcome)
+	}
+}
+
+// TestNativeRunner_CheckerFail verifies that exit 1 with a valid rejected
+// CheckerOutput returns a *RunError with Code == ExitFail.
+func TestNativeRunner_CheckerFail(t *testing.T) {
+	t.Parallel()
+	r := newHelper("fail")
+	_, err := r.Run(context.Background(), checkerID("test-checker", zeroDigest), nil)
+	if err == nil {
+		t.Fatal("expected error for checker fail, got nil")
+	}
+	var re *RunError
+	if ok := isRunError(err, &re); !ok {
+		t.Errorf("expected *RunError, got %T: %v", err, err)
+	} else if re.Code != ExitFail {
+		t.Errorf("expected ExitFail (%d), got code %d", ExitFail, re.Code)
+	}
+}
+
+// isRunError attempts to type-assert err to *RunError.
 func isRunError(err error, dst **RunError) bool {
 	re, ok := err.(*RunError)
 	if ok {

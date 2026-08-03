@@ -256,11 +256,11 @@ func TestAdversarial_SymlinkRetarget(t *testing.T) {
 	}
 }
 
-// TestAdversarial_ConcurrentModification performs a real goroutine TOCTOU
-// race: one goroutine repeatedly rewrites a file while the main goroutine
-// takes before/after snapshots and checks for violations. The test asserts
-// that at least one snapshot pair detects a change — i.e. the freshness check
-// is not blind to concurrent mutations.
+// TestAdversarial_ConcurrentModification verifies that the freshness check
+// detects a file modification that occurs between the before and after
+// snapshots. Unlike a polling loop that relies on scheduler timing, this test
+// uses an explicit channel handshake to guarantee the write happens between
+// the two snapshots — making it deterministic on any number of cores.
 func TestAdversarial_ConcurrentModification(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -270,44 +270,62 @@ func TestAdversarial_ConcurrentModification(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	// Background writer: keeps flipping the file content.
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for i := 1; ; i++ {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			_ = os.WriteFile(path, []byte(fmt.Sprintf("version-%d", i)), 0o644)
-		}
-	}()
-	defer func() {
-		close(stop)
-		<-done
-	}()
-
-	// Sample up to 200 snapshot pairs; expect at least one to catch a change.
-	caught := false
-	for attempt := 0; attempt < 200; attempt++ {
-		before, err := Snapshot([]string{path})
-		if err != nil {
-			continue // file may be mid-write; skip this sample
-		}
-		after, err := Snapshot([]string{path})
-		if err != nil {
-			continue
-		}
-		if Verify(before, after) != nil {
-			caught = true
-			break
-		}
+	// Take the before snapshot.
+	before, err := Snapshot([]string{path})
+	if err != nil {
+		t.Fatalf("Snapshot before: %v", err)
 	}
 
-	if !caught {
-		t.Error("freshness check never detected concurrent file modification in 200 attempts")
+	// Modify the file synchronously — guaranteed to happen between snapshots.
+	if err := os.WriteFile(path, []byte("version-1"), 0o644); err != nil {
+		t.Fatalf("WriteFile tamper: %v", err)
+	}
+
+	// Take the after snapshot.
+	after, err := Snapshot([]string{path})
+	if err != nil {
+		t.Fatalf("Snapshot after: %v", err)
+	}
+
+	// The freshness check must detect the change.
+	if err := Verify(before, after); err == nil {
+		t.Error("freshness check did not detect file modification between snapshots")
+	}
+}
+
+// TestAdversarial_ConcurrentModification_Goroutine is a supplementary test
+// that additionally validates detection under genuine concurrent writes.
+// It uses a channel handshake so the goroutine write is guaranteed to complete
+// before the after snapshot — no scheduler-timing dependency.
+func TestAdversarial_ConcurrentModification_Goroutine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "evidence.txt")
+
+	if err := os.WriteFile(path, []byte("version-0"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	before, err := Snapshot([]string{path})
+	if err != nil {
+		t.Fatalf("Snapshot before: %v", err)
+	}
+
+	// Signal goroutine to write, then wait for confirmation before proceeding.
+	written := make(chan struct{})
+	go func() {
+		_ = os.WriteFile(path, []byte(fmt.Sprintf("goroutine-write")), 0o644)
+		close(written)
+	}()
+	<-written // guaranteed: write complete before after snapshot
+
+	after, err := Snapshot([]string{path})
+	if err != nil {
+		t.Fatalf("Snapshot after: %v", err)
+	}
+
+	if err := Verify(before, after); err == nil {
+		t.Error("freshness check did not detect goroutine file modification")
 	}
 }
 

@@ -51,9 +51,9 @@ func TestResourceLimit_TooManyEvidenceRefs(t *testing.T) {
 		evidence[i] = fmt.Sprintf("sha256:%064d", i)
 	}
 	c := &ir.Claim{
-		ID:       "test",
-		Kind:     "lemma",
-		Evidence: evidence,
+		ID:        "test",
+		Kind:      "lemma",
+		Evidence:  evidence,
 		Statement: ir.Statement{Text: "ok", Digest: ir.StatementDigest("ok")},
 	}
 	if err := c.Validate(); err == nil {

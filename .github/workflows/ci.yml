@@ -26,8 +26,20 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Format check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-compliant:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Static analysis
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
       - name: Test
-        run: go test ./...
+        run: go test -timeout 120s ./...
 
       - name: Test with race detector
-        run: go test -race ./...
+        run: go test -race -timeout 120s ./...

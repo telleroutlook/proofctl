@@ -132,7 +132,7 @@ func TestComputeWithReasons_FiveClaimChain(t *testing.T) {
 	d := dag.New()
 	addClaim(t, d, "leaf")
 	addClaim(t, d, "mid1", "leaf")
-	addClaim(t, d, "bad", "mid1")   // this one is disproved
+	addClaim(t, d, "bad", "mid1") // this one is disproved
 	addClaim(t, d, "mid2", "bad")
 	addClaim(t, d, "top", "mid2")
 

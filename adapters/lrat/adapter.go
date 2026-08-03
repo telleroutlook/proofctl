@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	lratdomain "github.com/telleroutlook/proofctl/internal/lrat"
 	"github.com/telleroutlook/proofctl/internal/ir"
+	lratdomain "github.com/telleroutlook/proofctl/internal/lrat"
 )
 
 // Adapter compiles LRAT problem descriptions into ProofGraph IR.

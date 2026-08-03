@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	lrat "github.com/telleroutlook/proofctl/adapters/lrat"
-	lratdomain "github.com/telleroutlook/proofctl/internal/lrat"
 	"github.com/telleroutlook/proofctl/internal/dag"
 	"github.com/telleroutlook/proofctl/internal/ir"
+	lratdomain "github.com/telleroutlook/proofctl/internal/lrat"
 )
 
 // validSpec returns a complete, valid ProblemSpec for testing.

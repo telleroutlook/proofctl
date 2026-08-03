@@ -14,19 +14,19 @@ import (
 type ConditionID string
 
 const (
-	CondGlobalStatusAccepted    ConditionID = "C01-global-status-accepted"
+	CondGlobalStatusAccepted     ConditionID = "C01-global-status-accepted"
 	CondAssumptionFootprintEmpty ConditionID = "C02-assumption-footprint-empty"
-	CondAllAssurancesAllowed    ConditionID = "C03-assurances-allowed"
-	CondCAPFormatV2Frozen       ConditionID = "C04-cap-format-v2-frozen"
-	CondDigestsFresh            ConditionID = "C05-digests-fresh"
-	CondPathKeysMatch           ConditionID = "C06-path-keys-match"
-	CondIntervalsIntersect      ConditionID = "C07-intervals-intersect"
-	CondMatrixReconstructed     ConditionID = "C08-matrix-reconstructed"
-	CondLDLTPasses              ConditionID = "C09-ldlt-passes"
-	CondOddSectorPasses         ConditionID = "C10-odd-sector-passes"
-	CondEvenSectorPasses        ConditionID = "C11-even-sector-passes"
-	CondPivotRadiusRatio        ConditionID = "C12-pivot-radius-ratio"
-	CondReplayConsistency       ConditionID = "C13-replay-consistency"
+	CondAllAssurancesAllowed     ConditionID = "C03-assurances-allowed"
+	CondCAPFormatV2Frozen        ConditionID = "C04-cap-format-v2-frozen"
+	CondDigestsFresh             ConditionID = "C05-digests-fresh"
+	CondPathKeysMatch            ConditionID = "C06-path-keys-match"
+	CondIntervalsIntersect       ConditionID = "C07-intervals-intersect"
+	CondMatrixReconstructed      ConditionID = "C08-matrix-reconstructed"
+	CondLDLTPasses               ConditionID = "C09-ldlt-passes"
+	CondOddSectorPasses          ConditionID = "C10-odd-sector-passes"
+	CondEvenSectorPasses         ConditionID = "C11-even-sector-passes"
+	CondPivotRadiusRatio         ConditionID = "C12-pivot-radius-ratio"
+	CondReplayConsistency        ConditionID = "C13-replay-consistency"
 )
 
 // ConditionResult records whether one release condition passed.

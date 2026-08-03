@@ -900,12 +900,12 @@ func cmdRelease(args []string, useJSON bool) {
 		Blocker string `json:"blocker,omitempty"`
 	}
 	type releaseOutput struct {
-		Pass            bool             `json:"pass"`
-		Blockers        []string         `json:"blockers"`
-		Conditions      []conditionEntry `json:"conditions,omitempty"`
-		Released        bool             `json:"released"`
+		Pass            bool              `json:"pass"`
+		Blockers        []string          `json:"blockers"`
+		Conditions      []conditionEntry  `json:"conditions,omitempty"`
+		Released        bool              `json:"released"`
 		Defects         map[string]string `json:"defects,omitempty"`
-		CertifiedRadius interface{}      `json:"certified_radius"`
+		CertifiedRadius interface{}       `json:"certified_radius"`
 	}
 
 	// Evaluate the 13 structured conditions.
@@ -924,10 +924,10 @@ func cmdRelease(args []string, useJSON bool) {
 				condEntries[i] = conditionEntry{ID: string(c.ID), Passed: c.Passed, Blocker: c.Blocker}
 			}
 			out := releaseOutput{
-				Pass:       pass,
-				Blockers:   blockers,
-				Conditions: condEntries,
-				Released:   false,
+				Pass:            pass,
+				Blockers:        blockers,
+				Conditions:      condEntries,
+				Released:        false,
 				CertifiedRadius: nil,
 			}
 			if len(defects) > 0 {
@@ -978,10 +978,10 @@ func cmdRelease(args []string, useJSON bool) {
 			condEntries[i] = conditionEntry{ID: string(c.ID), Passed: c.Passed, Blocker: c.Blocker}
 		}
 		out := releaseOutput{
-			Pass:       pass,
-			Blockers:   blockers,
-			Conditions: condEntries,
-			Released:   pass,
+			Pass:            pass,
+			Blockers:        blockers,
+			Conditions:      condEntries,
+			Released:        pass,
 			CertifiedRadius: nil,
 		}
 		if pass {
@@ -1163,11 +1163,11 @@ func cmdVerify(args []string, useJSON bool) {
 	}
 
 	type verifyResult struct {
-		ClaimID  string `json:"claim_id"`
-		Outcome  string `json:"outcome"`
+		ClaimID   string `json:"claim_id"`
+		Outcome   string `json:"outcome"`
 		Assurance string `json:"assurance"`
-		CacheHit bool   `json:"cache_hit"`
-		Error    string `json:"error,omitempty"`
+		CacheHit  bool   `json:"cache_hit"`
+		Error     string `json:"error,omitempty"`
 	}
 
 	var results []verifyResult
@@ -1218,10 +1218,10 @@ func cmdVerify(args []string, useJSON bool) {
 		}
 		if useJSON {
 			results = append(results, verifyResult{
-				ClaimID:  claimID,
-				Outcome:  res.Attestation.Outcome,
+				ClaimID:   claimID,
+				Outcome:   res.Attestation.Outcome,
 				Assurance: string(res.Attestation.Assurance),
-				CacheHit: res.CacheHit,
+				CacheHit:  res.CacheHit,
 			})
 		} else {
 			if res.Attestation.Outcome == "accepted" {

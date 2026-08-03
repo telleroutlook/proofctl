@@ -11,8 +11,8 @@ import (
 
 // GlobalAttestation is the combined result of all local attestations for a proof graph.
 type GlobalAttestation struct {
-	Attestations []ir.Attestation `json:"attestations"`
-	SelfDigestValue string        `json:"self_digest"`
+	Attestations    []ir.Attestation `json:"attestations"`
+	SelfDigestValue string           `json:"self_digest"`
 }
 
 // Combine aggregates a slice of local attestations into a GlobalAttestation.
