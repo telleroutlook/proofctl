@@ -144,6 +144,7 @@ func (p *Pipeline) Run(
 
 	// Record start time.
 	startTime := time.Now()
+	startDate := startTime.UTC().Format("2006-01-02")
 
 	// 6. Run checker.
 	outputBytes, runErr := p.Runner.Run(ctx, checkerID, bytes.NewReader(inputJSON))
@@ -212,6 +213,8 @@ func (p *Pipeline) Run(
 		Outcome:           outcomeStr,
 		Assurance:         ir.Assurance(assuranceStr),
 		ErrorCode:         errorCode,
+		StartFreshness:    startDate,
+		EndFreshness:      startDate,
 		Resources: ir.ResourceStats{
 			WallMillis: wallMillis,
 		},

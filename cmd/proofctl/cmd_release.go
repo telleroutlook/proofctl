@@ -61,7 +61,7 @@ func cmdRelease(args []string, useJSON bool) {
 				Blockers:      blockers,
 				Conditions:    condEntries,
 				Released:      false,
-				ReleaseTarget: nil,
+				ReleaseTarget: pol.Target,
 			}
 			if len(defects) > 0 {
 				out.Defects = defects
@@ -73,6 +73,7 @@ func cmdRelease(args []string, useJSON bool) {
 		}
 		if pass {
 			fmt.Println("RELEASE DRY-RUN: PASS")
+			fmt.Printf("release_target: %s\n", pol.Target)
 		} else {
 			fmt.Printf("RELEASE DRY-RUN: BLOCKED\n\n")
 			fmt.Printf("Conditions (%d):\n", len(conditions))
@@ -94,7 +95,7 @@ func cmdRelease(args []string, useJSON bool) {
 			for claimID, reason := range defects {
 				fmt.Printf("  [DEFECT] %s: %s\n", claimID, reason)
 			}
-			fmt.Println("\nrelease_target: null")
+			fmt.Printf("\nrelease_target: %s (blocked)\n", pol.Target)
 		}
 		return
 	}
@@ -152,7 +153,7 @@ func cmdRelease(args []string, useJSON bool) {
 		for claimID, reason := range defects {
 			fmt.Printf("  [DEFECT] %s: %s\n", claimID, reason)
 		}
-		fmt.Println("\nrelease_target: null")
+		fmt.Printf("\nrelease_target: %s (blocked)\n", pol.Target)
 	}
 }
 

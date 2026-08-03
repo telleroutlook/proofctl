@@ -33,17 +33,27 @@ func cmdKey(args []string, useJSON bool) {
 func cmdKeyGenerate(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("key generate", flag.ContinueOnError)
 	nameFlag := fs.String("name", "default", "key name (stored as <name>.priv and <name>.pub)")
+	outFlag := fs.String("out", "", "output directory (default: <project>/.proofctl/keys/)")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
 
-	cwd, _ := os.Getwd()
-	root, err := config.Find(cwd)
-	if err != nil {
-		die(useJSON, errors.CodeInvalidInput, err.Error())
+	var dir string
+	var projectRoot string
+	if *outFlag != "" {
+		dir = *outFlag
+		// Best-effort: find project root for .gitignore update; ignore if not in a project.
+		cwd, _ := os.Getwd()
+		projectRoot, _ = config.Find(cwd)
+	} else {
+		cwd, _ := os.Getwd()
+		root, err := config.Find(cwd)
+		if err != nil {
+			die(useJSON, errors.CodeInvalidInput, err.Error())
+		}
+		projectRoot = root
+		dir = filepath.Join(root, config.DirName, keysDir)
 	}
-
-	dir := filepath.Join(root, config.DirName, keysDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		die(useJSON, errors.CodeInternalError, "key generate: mkdir keys: "+err.Error())
 	}
@@ -64,7 +74,9 @@ func cmdKeyGenerate(args []string, useJSON bool) {
 	}
 
 	// Ensure .gitignore covers *.priv
-	ensureGitignore(root, "*.priv")
+	if projectRoot != "" {
+		ensureGitignore(projectRoot, "*.priv")
+	}
 
 	if useJSON {
 		enc := json.NewEncoder(os.Stdout)

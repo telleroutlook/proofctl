@@ -479,12 +479,22 @@ func printAttestationDiff(claimID string, prev, curr []byte) {
 		changed++
 		fmt.Printf("%-30s  %-35s  %s\n", "metadata", truncate(prevMeta, 35), truncate(currMeta, 35))
 	}
-	// Signature.
+	// Signature — expand nested fields instead of truncating the raw JSON blob.
 	prevSig := trimJSON(a["signature"])
 	currSig := trimJSON(b["signature"])
 	if prevSig != currSig {
 		changed++
-		fmt.Printf("%-30s  %-35s  %s\n", "signature", truncate(prevSig, 35), truncate(currSig, 35))
+		prevFields := expandSignature(a["signature"])
+		currFields := expandSignature(b["signature"])
+		allSigKeys := []string{"pubkey_fingerprint", "algorithm", "value"}
+		for _, sk := range allSigKeys {
+			pv, cv := prevFields[sk], currFields[sk]
+			if pv == cv {
+				continue
+			}
+			label := "signature." + sk
+			fmt.Printf("%-30s  %-35s  %s\n", label, truncate(pv, 35), truncate(cv, 35))
+		}
 	}
 
 	_ = seen // all fields checked above
@@ -503,4 +513,22 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-3] + "..."
+}
+
+// expandSignature unmarshals a signature JSON blob into a string map so each
+// sub-field (pubkey_fingerprint, algorithm, value) can be diffed individually.
+func expandSignature(raw json.RawMessage) map[string]string {
+	out := map[string]string{"pubkey_fingerprint": "(absent)", "algorithm": "(absent)", "value": "(absent)"}
+	if raw == nil {
+		return out
+	}
+	var sig map[string]string
+	if err := json.Unmarshal(raw, &sig); err != nil {
+		out["pubkey_fingerprint"] = trimJSON(raw)
+		return out
+	}
+	for k, v := range sig {
+		out[k] = v
+	}
+	return out
 }

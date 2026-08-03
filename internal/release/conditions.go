@@ -175,7 +175,7 @@ func checkC04ReplayConsistency(graph *dag.DAG, attestations map[string]*ir.Attes
 		return ConditionResult{
 			ID:      CondReplayConsistency,
 			Passed:  false,
-			Blocker: "C04: replay consistency missing for: " + strings.Join(missing, ", "),
+			Blocker: "C04: replay consistency missing for: " + strings.Join(missing, ", ") + " — run 'proofctl replay' (not 'proofctl check') to populate freshness fields",
 		}
 	}
 	return ConditionResult{ID: CondReplayConsistency, Passed: true}
