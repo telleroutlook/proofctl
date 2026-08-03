@@ -91,7 +91,11 @@ func (s *Store) Open(digest string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(s.blobPath(hexDigest))
+	blobPath := s.blobPath(hexDigest)
+	if err := s.checkSymlinkEscape(blobPath); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(blobPath)
 	if err != nil {
 		return nil, fmt.Errorf("cas: open %s: %w", digest, err)
 	}
@@ -106,7 +110,12 @@ func (s *Store) Verify(desc ir.EvidenceDescriptor) error {
 		return err
 	}
 
-	f, err := os.Open(s.blobPath(hexDigest))
+	blobPath := s.blobPath(hexDigest)
+	if err := s.checkSymlinkEscape(blobPath); err != nil {
+		return err
+	}
+
+	f, err := os.Open(blobPath)
 	if err != nil {
 		return fmt.Errorf("cas: verify open %s: %w", desc.Digest, err)
 	}
@@ -149,4 +158,25 @@ func parseDigest(digest string) (string, error) {
 		return "", fmt.Errorf("cas: invalid sha256 digest %q: must be 64 lowercase hex characters", digest)
 	}
 	return hex, nil
+}
+
+// checkSymlinkEscape resolves the real path of blobPath and verifies that it
+// stays inside the CAS root. This prevents an attacker who can plant a symlink
+// inside the CAS blob tree from escaping the root via a crafted-but-valid
+// digest string.
+func (s *Store) checkSymlinkEscape(blobPath string) error {
+	real, err := filepath.EvalSymlinks(blobPath)
+	if err != nil {
+		// File doesn't exist yet or symlink is dangling — not an escape.
+		return nil
+	}
+	root, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		return fmt.Errorf("cas: resolve root: %w", err)
+	}
+	rel, err := filepath.Rel(root, real)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("cas: symlink escape detected: %q resolves outside CAS root", blobPath)
+	}
+	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"regexp"
 
 	"github.com/telleroutlook/proofctl/internal/ir"
 )
@@ -61,4 +62,41 @@ func CacheKey(
 	}
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum)
+}
+
+// checkerDigestRe matches a valid sha256 digest: "sha256:" followed by exactly
+// 64 lowercase hexadecimal characters.
+var checkerDigestRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// zeroCheckerDigest is the all-zeros development placeholder digest.
+const zeroCheckerDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+// allowedNetworks is the set of valid network values for a CheckerIdentity.
+var allowedNetworks = map[string]bool{
+	"none": true,
+	"host": true,
+	"":     true,
+}
+
+// Validate checks that id is a well-formed CheckerIdentity.
+// It returns nil for development/shadow checkers that carry a zero digest.
+// Non-zero digests must match the sha256:<64hex> format.
+func Validate(id ir.CheckerIdentity) error {
+	if id.ID == "" {
+		return fmt.Errorf("checker: identity ID must not be empty")
+	}
+	if id.ProtocolVersion <= 0 {
+		return fmt.Errorf("checker: protocol_version must be > 0, got %d", id.ProtocolVersion)
+	}
+	if !allowedNetworks[id.Network] {
+		return fmt.Errorf("checker: network %q is not allowed (must be one of: none, host, empty)", id.Network)
+	}
+	// Allow zero digest (dev/shadow placeholder) and empty digest.
+	if id.CheckerDigest == "" || id.CheckerDigest == zeroCheckerDigest {
+		return nil
+	}
+	if !checkerDigestRe.MatchString(id.CheckerDigest) {
+		return fmt.Errorf("checker: checker_digest %q has invalid format (want sha256:<64 hex chars>)", id.CheckerDigest)
+	}
+	return nil
 }

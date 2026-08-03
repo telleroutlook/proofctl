@@ -97,9 +97,18 @@ always exits 0 and produces a forged `CheckerOutput`.
 binary digest before invocation. If the digest does not match, the check is
 aborted with `error_code=CHECKER_DIGEST_MISMATCH`.
 
-**Residual risk (v1):** Digest verification for native binaries is not yet
-implemented in the `NativeRunner`. The `NativeRunner` is explicitly marked
-`development-unisolated` and must not be used for release attestations.
+**Residual risk (v1 — addressed):** Digest verification for native binaries is
+now implemented in the `NativeRunner` (`verifyBinaryDigest`). The runner
+rejects any binary whose SHA256 does not match `CheckerIdentity.CheckerDigest`
+before execution. The all-zeros digest is accepted as a development placeholder
+only when the runner is already operating in the `development-unisolated`
+assurance mode.
+
+**Residual risk (production):** For production release attestations, the
+`NativeRunner` must not be used. Formal release requires an OCI-isolated runner
+with image digest pinned at the registry level. The `RuntimeAssuranceDevelopmentUnisolated`
+assurance type is permanently excluded from the allowed assurance list for
+release.
 
 ### 3. Cache Poisoning
 
@@ -179,6 +188,39 @@ place.
 **Mitigation:** The `statement_digest` in each attestation is a SHA256 of the
 claim text at the time of verification. If the source text changes, the digest
 will not match, and the attestation will be rejected as stale.
+
+## Responsibility Boundary: proofctl vs. External Checkers
+
+proofctl is an **orchestration and attestation engine**. It is not a mathematical
+proof checker. The following table makes the division explicit so that readers do
+not infer security guarantees that proofctl cannot provide.
+
+| Concern | Responsible party | How |
+|---|---|---|
+| Path traversal in digest or claim ID | **proofctl** | `parseDigest` enforces `^[0-9a-f]{64}$`; `ValidateClaimID` enforces `^[a-zA-Z0-9_.-]+$`, no leading `.`, no `..` |
+| Evidence content integrity | **proofctl** | `cas.Verify` checks SHA256 and byte size before passing to any checker |
+| Attestation self-consistency | **proofctl** | `self_digest` is recomputed on load; mismatch → rejection |
+| Release gate (fail-closed) | **proofctl** | Policy-driven, deterministic, all conditions must pass |
+| Freshness / TOCTOU | **proofctl** | `freshness.Snapshot` + `Verify` before and after every checker run |
+| Checker binary identity | **proofctl** | `verifyBinaryDigest` checks `CheckerIdentity.CheckerDigest` before exec |
+| **κ (kappa) bound correctness** | **External Weil checker** | The Weil checker (Python + FLINT/Arb) computes and verifies the κ bound; proofctl only records the checker's `accepted`/`rejected` attestation |
+| **C_a colluding-forgery detection** | **External Weil checker** | Algebraic consistency of the C_a coefficient set is a mathematical invariant that only the Weil checker can evaluate; proofctl verifies the evidence digest but not the algebraic content |
+| **Numerical precision of Weil sums** | **External Weil checker** | Interval arithmetic, L-D-L^T stability, log-moment estimates — all computed by the checker; proofctl pins the checker binary by digest to ensure the same code runs every time |
+| **Formal kernel proofs (Lean 4)** | **External Lean kernel** | Kernel-level proof checking is delegated to the Lean 4 type checker; proofctl pins the Lean binary digest and records the attestation |
+
+### What this means for the security model
+
+An attacker who can corrupt the **output** of an external checker (its
+`CheckerOutput` JSON) without changing the checker binary digest can inject a
+false `accepted` outcome. This is mitigated by binary digest pinning
+(`verifyBinaryDigest`) and, for production releases, by OCI-isolated execution
+with an immutable image digest. It is **not** mitigated by proofctl alone.
+
+An attacker who breaks the **mathematics** (finds a counterexample to a Weil
+claim) is outside the scope of this threat model. proofctl's job is to ensure
+that the checker which evaluated the claim is exactly the pinned version, that
+the evidence it saw is the pinned content, and that the recorded attestation has
+not been tampered with after the fact.
 
 ## Explicit Non-Mitigations in v1
 

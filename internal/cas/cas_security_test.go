@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -178,6 +180,67 @@ func TestAdversarial_PathTraversal_UppercaseHex(t *testing.T) {
 	// Must be a validation error, not a file-not-found after traversal.
 	if !strings.Contains(err.Error(), "digest") && !strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "hex") {
 		t.Fatalf("error should be a validation error, got: %v", err)
+	}
+}
+
+// TestAdversarial_SymlinkEscape verifies that the CAS store cannot be used to
+// read a file outside the CAS root via a symlink placed inside the CAS tree.
+// An attacker who can create a symlink inside the CAS blob directory (e.g. via
+// a race or a directory traversal in another layer) must not be able to read
+// arbitrary files by feeding a digest whose resolved path hits the symlink.
+func TestAdversarial_SymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Create a sensitive file OUTSIDE the CAS root.
+	sensitiveDir := t.TempDir()
+	sensitiveFile := filepath.Join(sensitiveDir, "sensitive.txt")
+	if err := os.WriteFile(sensitiveFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write sensitive file: %v", err)
+	}
+
+	s, err := cas.New(filepath.Join(dir, "cas"))
+	if err != nil {
+		t.Fatalf("cas.New: %v", err)
+	}
+
+	// Store a real blob so the sha256/<prefix>/ directory structure exists.
+	content := []byte("legit content")
+	digest, _, err := s.Store(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	// Parse the stored hex to find the blob directory.
+	hexPart := strings.TrimPrefix(digest, "sha256:")
+	blobDir := filepath.Join(dir, "cas", "sha256", hexPart[:2])
+
+	// Plant a symlink inside the CAS blob subdirectory pointing outside.
+	// The symlink name is 62 'a' chars — a path component that would be reached
+	// if the digest were "sha256:" + hexPart[:2] + strings.Repeat("a", 62).
+	symlinkName := strings.Repeat("a", 62)
+	symlinkPath := filepath.Join(blobDir, symlinkName)
+	if err := os.Symlink(sensitiveFile, symlinkPath); err != nil {
+		t.Skipf("cannot create symlink (possibly unsupported fs): %v", err)
+	}
+
+	// Build a digest that would resolve to the symlink path.
+	crafted := "sha256:" + hexPart[:2] + strings.Repeat("a", 62)
+
+	// The CAS must reject this digest: either because parseDigest rejects it as
+	// non-hex, or because checkSymlinkEscape detects the symlink escaping the root.
+	// Both outcomes are correct security behavior.
+	_, openErr := s.Open(crafted)
+	if openErr == nil {
+		t.Fatal("CAS opened a symlink-based digest — symlink escape was not blocked")
+	}
+	// Confirm it is a security error (validation or symlink escape), not a generic I/O error.
+	errStr := openErr.Error()
+	isValidationErr := strings.Contains(errStr, "digest") || strings.Contains(errStr, "invalid") || strings.Contains(errStr, "hex")
+	isSymlinkErr := strings.Contains(errStr, "symlink")
+	if !isValidationErr && !isSymlinkErr {
+		t.Fatalf("expected a digest validation or symlink escape error, got: %v", openErr)
 	}
 }
 

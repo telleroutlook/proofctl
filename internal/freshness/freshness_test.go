@@ -1,6 +1,7 @@
 package freshness
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -167,6 +168,146 @@ func TestSnapshotMultipleFiles(t *testing.T) {
 		if _, ok := snap[p]; !ok {
 			t.Errorf("missing entry for %q", p)
 		}
+	}
+}
+
+// TestAdversarial_SymlinkTarget checks that Snapshot hashes the content of a
+// symlink target, not just the link itself, so that replacing the target is
+// detected as a freshness violation.
+func TestAdversarial_SymlinkTarget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Create the real target file.
+	target := filepath.Join(dir, "real.txt")
+	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Create a symlink pointing at the target.
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported on this filesystem: %v", err)
+	}
+
+	// Take before snapshot through the symlink.
+	before, err := Snapshot([]string{link})
+	if err != nil {
+		t.Fatalf("Snapshot before: %v", err)
+	}
+
+	// Replace the symlink target content.
+	if err := os.WriteFile(target, []byte("tampered"), 0o644); err != nil {
+		t.Fatalf("WriteFile tamper: %v", err)
+	}
+
+	// Take after snapshot through the same symlink.
+	after, err := Snapshot([]string{link})
+	if err != nil {
+		t.Fatalf("Snapshot after: %v", err)
+	}
+
+	// Verify must detect the content change.
+	if err := Verify(before, after); err == nil {
+		t.Fatal("expected freshness violation when symlink target content changes, got nil")
+	}
+}
+
+// TestAdversarial_SymlinkRetarget checks that redirecting a symlink to a
+// different file (while keeping the link path constant) is detected.
+func TestAdversarial_SymlinkRetarget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	original := filepath.Join(dir, "original.txt")
+	replacement := filepath.Join(dir, "replacement.txt")
+	if err := os.WriteFile(original, []byte("original content"), 0o644); err != nil {
+		t.Fatalf("WriteFile original: %v", err)
+	}
+	if err := os.WriteFile(replacement, []byte("replacement content"), 0o644); err != nil {
+		t.Fatalf("WriteFile replacement: %v", err)
+	}
+
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(original, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	before, err := Snapshot([]string{link})
+	if err != nil {
+		t.Fatalf("Snapshot before: %v", err)
+	}
+
+	// Atomically retarget the symlink (remove + re-create).
+	if err := os.Remove(link); err != nil {
+		t.Fatalf("Remove link: %v", err)
+	}
+	if err := os.Symlink(replacement, link); err != nil {
+		t.Fatalf("Symlink retarget: %v", err)
+	}
+
+	after, err := Snapshot([]string{link})
+	if err != nil {
+		t.Fatalf("Snapshot after: %v", err)
+	}
+
+	if err := Verify(before, after); err == nil {
+		t.Fatal("expected freshness violation when symlink is retargeted, got nil")
+	}
+}
+
+// TestAdversarial_ConcurrentModification performs a real goroutine TOCTOU
+// race: one goroutine repeatedly rewrites a file while the main goroutine
+// takes before/after snapshots and checks for violations. The test asserts
+// that at least one snapshot pair detects a change — i.e. the freshness check
+// is not blind to concurrent mutations.
+func TestAdversarial_ConcurrentModification(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "evidence.txt")
+
+	if err := os.WriteFile(path, []byte("version-0"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Background writer: keeps flipping the file content.
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 1; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.WriteFile(path, []byte(fmt.Sprintf("version-%d", i)), 0o644)
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-done
+	}()
+
+	// Sample up to 200 snapshot pairs; expect at least one to catch a change.
+	caught := false
+	for attempt := 0; attempt < 200; attempt++ {
+		before, err := Snapshot([]string{path})
+		if err != nil {
+			continue // file may be mid-write; skip this sample
+		}
+		after, err := Snapshot([]string{path})
+		if err != nil {
+			continue
+		}
+		if Verify(before, after) != nil {
+			caught = true
+			break
+		}
+	}
+
+	if !caught {
+		t.Error("freshness check never detected concurrent file modification in 200 attempts")
 	}
 }
 

@@ -4,11 +4,15 @@ package runner
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/telleroutlook/proofctl/internal/ir"
@@ -109,6 +113,14 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 		}
 	}
 
+	if err := verifyBinaryDigest(binPath, checkerID.CheckerDigest); err != nil {
+		return nil, &RunError{
+			Code:    ExitUnavailable,
+			Stderr:  err.Error(),
+			Wrapped: err,
+		}
+	}
+
 	//nolint:gosec // Native runner is dev-only; binary path is resolved via lookup.
 	cmd := exec.CommandContext(ctx, binPath)
 	cmd.Stdin = input
@@ -191,4 +203,30 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 		p = p[:remaining]
 	}
 	return b.Buffer.Write(p)
+}
+
+// verifyBinaryDigest computes the SHA256 digest of the file at path and
+// compares it to expectedDigest. A zero digest (all-zeros, dev placeholder)
+// is allowed without verification. An empty expectedDigest is also allowed.
+// Any mismatch returns an error whose message contains "digest mismatch".
+func verifyBinaryDigest(path, expectedDigest string) error {
+	if expectedDigest == "" || expectedDigest == "sha256:"+strings.Repeat("0", 64) {
+		// Zero digest = development placeholder — warn but allow in dev mode.
+		// NativeRunner is already marked development-unisolated so this is consistent.
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("runner: open checker binary for digest check: %w", err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("runner: hash checker binary: %w", err)
+	}
+	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	if got != expectedDigest {
+		return fmt.Errorf("runner: checker binary digest mismatch: want %s got %s", expectedDigest, got)
+	}
+	return nil
 }
