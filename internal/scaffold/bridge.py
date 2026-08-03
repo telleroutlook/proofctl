@@ -27,8 +27,8 @@ Metadata keys populated on exit 0 (checker passes):
     intervals_intersect  — "true" (checker verified Path B crosscheck)
     matrix_reconstructed — "true" (checker verified matrix reconstruction)
     ldlt_passes          — "true" (checker verified interval LDL^T)
-    odd_sector_passes    — "true" if claim_id contains "odd", else absent
-    even_sector_passes   — "true" if claim_id contains "even", else absent
+    odd_sector_passes    — "true" if certificate "sector" field is "odd"
+    even_sector_passes   — "true" if certificate "sector" field is "even"
     pivot_radius_ratio   — from certificate "margin_ratio" field if present
 """
 
@@ -157,10 +157,10 @@ def main() -> None:
     if margin:
         metadata["pivot_radius_ratio"] = margin
 
-    cid_lower = claim_id.lower()
-    if "odd" in cid_lower:
+    sector = _read_cert_field(cert_path, "sector")
+    if sector == "odd":
         metadata["odd_sector_passes"] = "true"
-    if "even" in cid_lower:
+    elif sector == "even":
         metadata["even_sector_passes"] = "true"
 
     json.dump(_out(claim_id, "accepted", "deterministic-cap", metadata=metadata),
