@@ -1,0 +1,20 @@
+{
+  "version": "1",
+  "target": "thm-REPLACE-ME",
+  "allowed_assurances": [
+    "formal-kernel",
+    "deterministic-cap",
+    "exact-replay",
+    "reproducible-computation",
+    "independent-review"
+  ],
+  "forbidden_assurances": [
+    "ai-review",
+    "assumption",
+    "shadow-review"
+  ],
+  "required_claims": [
+    "thm-REPLACE-ME"
+  ],
+  "required_metadata_keys": []
+}

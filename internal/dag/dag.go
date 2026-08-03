@@ -197,3 +197,53 @@ func (d *DAG) impactFrom(id string, visited map[string]bool) {
 		}
 	}
 }
+
+// Levels partitions all claims into topological levels such that claims within
+// the same level have no dependency on each other and can be verified in parallel.
+// Level 0 contains all root claims (no dependencies). Each subsequent level
+// contains claims whose dependencies are all in earlier levels.
+// Claims within a level are sorted by ID for deterministic output.
+func (d *DAG) Levels() [][]string {
+	remaining := make(map[string]int, len(d.claims))
+	for id, c := range d.claims {
+		remaining[id] = len(c.DependsOn)
+	}
+
+	var levels [][]string
+	for len(remaining) > 0 {
+		var level []string
+		for id, deg := range remaining {
+			if deg == 0 {
+				level = append(level, id)
+			}
+		}
+		// Sort for determinism.
+		sortStrings(level)
+		for _, id := range level {
+			delete(remaining, id)
+			// Decrement dependents.
+			for rid, c := range d.claims {
+				if _, done := remaining[rid]; !done {
+					continue
+				}
+				for _, dep := range c.DependsOn {
+					if dep == id {
+						remaining[rid]--
+						break
+					}
+				}
+			}
+		}
+		levels = append(levels, level)
+	}
+	return levels
+}
+
+// sortStrings sorts a string slice in place (insertion sort — short slices only).
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
+}

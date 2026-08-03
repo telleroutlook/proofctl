@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
 
-	"flag"
 	"github.com/telleroutlook/proofctl/internal/cas"
 	"github.com/telleroutlook/proofctl/internal/compile"
 	"github.com/telleroutlook/proofctl/internal/config"
@@ -23,10 +26,11 @@ import (
 // Usage:
 //
 //	proofctl verify @<claim-id>
-//	proofctl verify --project
+//	proofctl verify --project [--parallel N]
 func cmdVerify(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	projectFlag := fs.Bool("project", false, "verify all open claims in dependency order")
+	parallelFlag := fs.Int("parallel", 0, "max parallel checkers for --project (0 = number of CPUs)")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, "verify: "+err.Error())
 	}
@@ -40,34 +44,12 @@ func cmdVerify(args []string, useJSON bool) {
 	}
 
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
-
 	nr := &runner.NativeRunner{}
 	pipe := &verify.Pipeline{
 		DAG:       g,
 		CAS:       store,
 		AttestDir: attestDir,
 		Runner:    nr,
-	}
-
-	var targets []string
-	if *projectFlag {
-		order, err := topoSort(g)
-		if err != nil {
-			die(useJSON, errors.CodeCycleDetected, err.Error())
-		}
-		attestations := loadAttestations(root, useJSON)
-		for _, id := range order {
-			att, ok := attestations[id]
-			if ok && att.Outcome == string(ir.StatusAccepted) {
-				continue
-			}
-			targets = append(targets, id)
-		}
-	} else {
-		if len(fs.Args()) == 0 {
-			die(useJSON, errors.CodeInvalidInput, "usage: proofctl verify @<claim-id> or --project")
-		}
-		targets = []string{strings.TrimPrefix(fs.Args()[0], "@")}
 	}
 
 	type verifyResult struct {
@@ -78,65 +60,114 @@ func cmdVerify(args []string, useJSON bool) {
 		Error     string `json:"error,omitempty"`
 	}
 
-	var results []verifyResult
-	exitCode := 0
-
-	for _, claimID := range targets {
-		claim := g.Claim(claimID)
-		if claim == nil {
-			if useJSON {
-				results = append(results, verifyResult{ClaimID: claimID, Outcome: "error", Error: "unknown claim"})
-			} else {
-				fmt.Printf("ERROR %s: unknown claim\n", claimID)
-			}
-			exitCode = 1
-			continue
-		}
-
-		pg := loadRawGraph(root, useJSON)
-		checkerID, found := findChecker(pg, claim.CheckerPolicy)
-		if !found {
-			if useJSON {
-				results = append(results, verifyResult{ClaimID: claimID, Outcome: "error", Error: "no checker for policy " + claim.CheckerPolicy})
-			} else {
-				fmt.Printf("ERROR %s: no checker for policy %q\n", claimID, claim.CheckerPolicy)
-			}
-			exitCode = 1
-			continue
-		}
-
-		evidence := findEvidence(pg, claim.Evidence)
-
-		res, runErr := pipe.Run(context.Background(), claimID, checkerID, evidence, "")
-		if runErr != nil {
-			if useJSON {
-				results = append(results, verifyResult{ClaimID: claimID, Outcome: "error", Error: runErr.Error()})
-			} else {
-				fmt.Printf("FAIL %s: %v\n", claimID, runErr)
-			}
-			exitCode = 1
-			continue
-		}
-
+	printResult := func(res verifyResult) {
 		cacheNote := ""
 		if res.CacheHit {
 			cacheNote = " [cache-hit]"
 		}
-		if useJSON {
-			results = append(results, verifyResult{
-				ClaimID:   claimID,
-				Outcome:   res.Attestation.Outcome,
-				Assurance: string(res.Attestation.Assurance),
-				CacheHit:  res.CacheHit,
+		switch {
+		case res.Error != "":
+			fmt.Printf("ERROR %s: %s\n", res.ClaimID, res.Error)
+		case res.Outcome == "accepted":
+			fmt.Printf("PASS %s%s\n", res.ClaimID, cacheNote)
+		default:
+			fmt.Printf("FAIL %s: outcome=%s%s\n", res.ClaimID, res.Outcome, cacheNote)
+		}
+	}
+
+	runOne := func(claimID string) verifyResult {
+		claim := g.Claim(claimID)
+		if claim == nil {
+			return verifyResult{ClaimID: claimID, Outcome: "error", Error: "unknown claim"}
+		}
+		pg := loadRawGraph(root, useJSON)
+		checkerID, found := findChecker(pg, claim.CheckerPolicy)
+		if !found {
+			return verifyResult{ClaimID: claimID, Outcome: "error", Error: "no checker for policy " + claim.CheckerPolicy}
+		}
+		evidence := findEvidence(pg, claim.Evidence)
+		res, runErr := pipe.Run(context.Background(), claimID, checkerID, evidence, "")
+		if runErr != nil {
+			return verifyResult{ClaimID: claimID, Outcome: "error", Error: runErr.Error()}
+		}
+		return verifyResult{
+			ClaimID:   claimID,
+			Outcome:   res.Attestation.Outcome,
+			Assurance: string(res.Attestation.Assurance),
+			CacheHit:  res.CacheHit,
+		}
+	}
+
+	var results []verifyResult
+	exitCode := 0
+
+	if *projectFlag {
+		maxWorkers := *parallelFlag
+		if maxWorkers <= 0 {
+			maxWorkers = runtime.NumCPU()
+		}
+
+		attestations := loadAttestations(root, useJSON)
+		levels := g.Levels()
+
+		for _, level := range levels {
+			var open []string
+			for _, id := range level {
+				att, ok := attestations[id]
+				if ok && att.Outcome == string(ir.StatusAccepted) {
+					continue
+				}
+				open = append(open, id)
+			}
+			if len(open) == 0 {
+				continue
+			}
+
+			sem := make(chan struct{}, maxWorkers)
+			var mu sync.Mutex
+			var wg sync.WaitGroup
+			levelResults := make([]verifyResult, len(open))
+
+			for i, claimID := range open {
+				wg.Add(1)
+				go func(idx int, cid string) {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					res := runOne(cid)
+					mu.Lock()
+					levelResults[idx] = res
+					mu.Unlock()
+				}(i, claimID)
+			}
+			wg.Wait()
+
+			sort.Slice(levelResults, func(i, j int) bool {
+				return levelResults[i].ClaimID < levelResults[j].ClaimID
 			})
-		} else {
-			if res.Attestation.Outcome == "accepted" {
-				fmt.Printf("PASS %s%s\n", claimID, cacheNote)
-			} else {
-				fmt.Printf("FAIL %s: outcome=%s%s\n", claimID, res.Attestation.Outcome, cacheNote)
-				exitCode = 1
+			for _, res := range levelResults {
+				if res.Error != "" || res.Outcome != "accepted" {
+					exitCode = 1
+				}
+				if !useJSON {
+					printResult(res)
+				}
+				results = append(results, res)
 			}
 		}
+	} else {
+		if len(fs.Args()) == 0 {
+			die(useJSON, errors.CodeInvalidInput, "usage: proofctl verify @<claim-id> or --project")
+		}
+		claimID := strings.TrimPrefix(fs.Args()[0], "@")
+		res := runOne(claimID)
+		if res.Error != "" || res.Outcome != "accepted" {
+			exitCode = 1
+		}
+		if !useJSON {
+			printResult(res)
+		}
+		results = append(results, res)
 	}
 
 	if useJSON {
@@ -144,7 +175,6 @@ func cmdVerify(args []string, useJSON bool) {
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(results)
 	}
-
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}

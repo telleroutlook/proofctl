@@ -1,0 +1,18 @@
+{
+  "claims": [
+    {
+      "id": "thm-REPLACE-ME",
+      "kind": "theorem",
+      "statement": {
+        "text": "REPLACE: this claim is extracted automatically from <div class=\"claim\" id=\"thm-REPLACE-ME\"> in your QMD file. Run: pandoc --to json yourfile.qmd | proofctl compile --adapter qmd /dev/stdin",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "required_assurance": ["independent-review"],
+      "evidence": [],
+      "checker_policy": ""
+    }
+  ],
+  "checkers": [],
+  "evidence": []
+}

@@ -38,80 +38,77 @@ proofctl 成为数学证明类项目的通用认证基础设施平台。数学�
 
 ---
 
-## Milestone 4 — 吸收 weil 经验，消除手动文件
+## Milestone 4 — 吸收 weil 经验，消除手动文件 ✅
 
 目标：weil-lower-bound 不再需要手写 STATUS.json 和 release-manifest.json；
 平台提供 replay、negative test、env 管理能力，所有 CAP 类项目受益。
 
-### T9：STATUS.json 字段增强
+### T9：STATUS.json 字段增强 ✅
+### T10：release-manifest.json 自动生成 ✅
+### T11：proofctl replay 子命令 ✅
+### T12：negative test 脚手架 ✅
 
-**问题：** weil 维护自己的 STATUS.json（`certified_radius`、`gates`、`as_of`），
-与 proofctl 写出的 STATUS.json 并存，语义重叠，手动维护。
+`internal/scaffold/templates/negative/` 包含：
+- `conftest.py`：pytest fixture（cert_path、cert_data、checker_cmd）
+- `test_tamper_basic.py`：5 个通用篡改用例
+- `README.md`：如何运行和扩展的说明
 
-**改造：**
-- `ReleaseStatus` 新增 `AsOf string json:"as_of"`（release 时间，RFC3339 date）
-- `ReleaseStatus` 新增 `ClaimSummary json:"claim_summary"`
-  （`accepted/blocked/open/rejected` 计数，替代 weil gates 的人工汇总）
-- 目标：weil-lower-bound 可以删除手写 STATUS.json，用 proofctl 的代替
-
-### T10：release-manifest.json 自动生成
-
-**问题：** weil 手写 release-manifest.json（证书路径、SHA-256、checker_exit、margin_ratio），
-这些数据全部来自 attestation.Metadata，完全可以自动生成。
-
-**改造：**
-- `Gate` 新增 `ProjectRoot string` 字段
-- `Gate.Release()` 成功后自动写出 `<project-root>/release-manifest.json`
-- 内容从 attestation.Metadata 提取（cap_format_version、pivot_radius_ratio 等）
-  + Evidence 的 path_hint 和 digest
-- `proofctl release --dry-run` 不写 manifest，只预览内容
-
-### T11：proofctl replay 子命令
-
-**问题：** weil 有 `scripts/replay_030.py`（D15 deliverable）：冷启动子进程重新生成
-+ 独立验证证书，是最强的完整性保证。这个模式对所有 CAP 类项目都适用，
-目前 proofctl 没有对应能力（verify 只调用 checker，不调用 generator）。
-
-**改造：** 新增 `proofctl replay` 子命令：
-```
-proofctl replay \
-  --generator "python -m src.generate_certificate --a 3/10 --sector odd --out {cert}" \
-  --cert-out /tmp/cert-replay.json \
-  <evidence-digest>
-```
-- 用 `{cert}` 占位符替换为实际临时路径
-- 步骤：① 运行 generator → ② 计算 SHA-256 与 evidence digest 对比 → ③ 通过 bridge 调用 checker → ④ 记录 cold_replay_date
-- 写出 replay attestation（assurance: `exact-replay`）
-- 输出 replay report（digest 匹配结果、checker exit、时间）
-
-### T12：negative test 脚手架
-
-**问题：** weil 有完整的 `tests/negative/`（17 个篡改测试 + 结构拒绝测试），
-是"checker 必须拒绝这些输入"的验证套件。对任何 CAP 域都是必要的，
-目前 `proofctl init --domain cap` 不生成测试目录。
-
-**改造：**
-- `internal/scaffold/templates/negative/` 新增三个测试模板：
-  - `test_tamper_basic.py`：5 个通用篡改用例（修改 conclusion、删除必需字段、注入未知字段、版本号错误、空 witnesses）
-  - `conftest.py`：pytest fixture（从 `certificates/` 目录找证书）
-  - `README.md`：说明如何运行和扩展
-- `scaffold.go` 的 cap 域入口写出 `tests/negative/` 目录
-
-### T13：proofctl env 子命令
-
-**问题：** weil 的 `environment.lock` 固定了 Python 版本、python-flint 版本、flint 版本
-和 OCI digest，但没有工具自动验证运行环境是否符合 lock。
-CAP 类项目的 checker 可重现性依赖于精确的运行时环境。
-
-**改造：** 新增 `proofctl env` 子命令：
-- `proofctl env verify --lock environment.lock`：读取 lock 文件，检查当前 Python
-  版本和关键包版本是否匹配，输出 PASS/FAIL 报告
-- `proofctl env snapshot --checker python3 --out environment.lock`：
-  自动抓取当前 Python 版本 + `pip freeze`，生成 lock 文件模板
+### T13：proofctl env 子命令 ✅
 
 ---
 
-## 关键设计约束
+## Milestone 5 — 性能与多域完善
+
+### T14：proofctl verify --project 并行调度
+
+**背景：** `proofctl verify --project` 当前按拓扑顺序串行调度所有 open claim。
+对于 weil-class 项目，odd/even sector 完全独立（在 DAG 中不互相依赖），
+可以并发运行，各自命中 CAS 缓存。
+
+**改造：**
+- 分析 DAG 找出可并发层（同一拓扑层内无边相连的 claim 集）
+- 对每一层内的 claim 并发调用 `verify.Pipeline.Run`
+- CAS 缓存已是线程安全的（content-addressed 读写），无需额外锁
+- 新增 `--parallel N` flag（默认 = CPU 核数），控制最大并发度
+- 输出顺序按 claim ID 排序，不因并发乱序
+
+**收益：** weil odd + even sector 验证从串行变并发，wall-clock 减半。
+
+### T15：lrat 域 policy 模板和 graph 模板
+
+**背景：** `proofctl domains list` 显示 lrat 的 BRIDGE/POLICY/GRAPH 均为 no，
+但 `internal/lrat/` 和 `adapters/lrat/` 已有完整实现，只缺脚手架文件。
+
+**改造：**
+- `internal/scaffold/templates/lrat-policy.json`：3-claim policy（formula/unsat/verified），
+  无 required_metadata_keys（LRAT 不用 CAP bridge）
+- `internal/scaffold/templates/lrat-graph.json`：3 个占位 claim 的 DAG 模板
+- `scaffold.KnownDomains` lrat 条目填入 PolicyTemplate 和 GraphTemplate
+- `proofctl init --domain lrat` 可用
+
+### T16：qmd 域 policy 模板和 graph 模板
+
+**背景：** qmd adapter 已完整实现（从 Pandoc JSON 提取 claim），只缺脚手架文件。
+
+**改造：**
+- `internal/scaffold/templates/qmd-policy.json`：通用 policy，允许 `independent-review`
+  assurance，无 required_metadata_keys
+- `internal/scaffold/templates/qmd-graph.json`：说明由 `proofctl compile --adapter qmd`
+  自动从 QMD 文件生成，模板仅提供示意
+- `scaffold.KnownDomains` qmd 条目填入 PolicyTemplate 和 GraphTemplate
+- `proofctl init --domain qmd` 可用
+
+---
+
+## 任务顺序（依赖关系）
+
+```
+M1–M4 全部完成 ✅
+
+T14 (verify 并行)      ──→ 独立，随时可做
+T15 (lrat 脚手架)      ──→ 独立，可与 T16 并行
+T16 (qmd 脚手架)       ──→ 独立，可与 T15 并行
+```
 
 1. **checker 独立性不变：** bridge.py 是协议翻译层，绝不引入 generator 侧代码
 2. **核心零领域知识：** `internal/` 下所有包继续零 Weil 依赖

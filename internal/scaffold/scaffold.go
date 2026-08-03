@@ -45,12 +45,16 @@ var KnownDomains = []Domain{
 		NegativeTests:  true,
 	},
 	{
-		Name:        "lrat",
-		Description: "LRAT SAT solver domain: formula → unsat → verified 3-claim graph",
+		Name:           "lrat",
+		Description:    "LRAT SAT solver domain: formula → unsat → verified 3-claim graph",
+		PolicyTemplate: "templates/lrat-policy.json",
+		GraphTemplate:  "templates/lrat-graph.json",
 	},
 	{
-		Name:        "qmd",
-		Description: "Quarto/Pandoc QMD document: extract claims from <div class=\"claim\"> blocks",
+		Name:           "qmd",
+		Description:    "Quarto/Pandoc QMD document: extract claims from <div class=\"claim\"> blocks",
+		PolicyTemplate: "templates/qmd-policy.json",
+		GraphTemplate:  "templates/qmd-graph.json",
 	},
 }
 
@@ -129,7 +133,7 @@ func writeTemplate(root, dst, src string) error {
 
 // writeNegativeTests writes the generic tamper test templates to <root>/tests/negative/.
 func writeNegativeTests(root string) error {
-	for _, name := range []string{"conftest.py", "test_tamper_basic.py"} {
+	for _, name := range []string{"conftest.py", "test_tamper_basic.py", "README.md"} {
 		if err := writeTemplate(root, filepath.Join("tests", "negative", name),
 			filepath.Join("templates", "negative", name)); err != nil {
 			return err
