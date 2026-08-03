@@ -11,6 +11,30 @@ import (
 	"github.com/telleroutlook/proofctl/internal/ir"
 )
 
+// TestAdversarial_MaliciousClaimID_PathTraversal verifies that AddClaim rejects
+// claim IDs that could be used for path traversal or injection.
+// On UNFIXED code AddClaim has no ID validation and accepts all of these.
+func TestAdversarial_MaliciousClaimID_PathTraversal(t *testing.T) {
+	t.Parallel()
+	maliciousIDs := []string{
+		"../../../escaped",
+		"../../foo",
+		".hidden",
+		"valid/../escape",
+		"claim with spaces",
+		"claim\x00null",
+		"",
+	}
+	for _, id := range maliciousIDs {
+		d := dag.New()
+		claim := &ir.Claim{ID: id, Kind: "lemma", DependsOn: []string{}}
+		err := d.AddClaim(claim)
+		if err == nil {
+			t.Errorf("AddClaim should reject malicious ID %q but accepted it", id)
+		}
+	}
+}
+
 // TestAdversarial_CycleDetected loads dag_cycle.json, builds a DAG, and checks
 // that Validate returns an error containing "cycle".
 func TestAdversarial_CycleDetected(t *testing.T) {

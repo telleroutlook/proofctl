@@ -2,6 +2,36 @@
 // All types are designed for strict JSON decoding; unknown fields are rejected.
 package ir
 
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+// claimIDRe matches claim IDs that contain only safe characters: alphanumeric,
+// underscore, hyphen, and dot. This prevents path traversal attacks when claim
+// IDs are used in file names.
+var claimIDRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+
+// ValidateClaimID returns an error if id is empty, contains characters outside
+// [a-zA-Z0-9_.-], starts with '.', or contains '..'.
+// This prevents path traversal attacks when claim IDs are joined to file paths.
+func ValidateClaimID(id string) error {
+	if id == "" {
+		return fmt.Errorf("ir: empty claim ID")
+	}
+	if !claimIDRe.MatchString(id) {
+		return fmt.Errorf("ir: claim ID %q contains invalid characters (allowed: a-z A-Z 0-9 _ . -)", id)
+	}
+	if strings.HasPrefix(id, ".") {
+		return fmt.Errorf("ir: claim ID %q must not start with '.'", id)
+	}
+	if strings.Contains(id, "..") {
+		return fmt.Errorf("ir: claim ID %q must not contain '..'", id)
+	}
+	return nil
+}
+
 // Claim represents a single mathematical claim in the proof graph.
 type Claim struct {
 	ID                string    `json:"id"`

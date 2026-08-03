@@ -35,10 +35,15 @@ The current certified radius is `null` until the release gate passes.
 mkdir myproject && cd myproject
 proofctl init
 cp /path/to/proofctl/examples/weil/graph.json .
+cp /path/to/proofctl/policies/weil-release-v1.json policies/
 proofctl compile --adapter weil graph.json
 proofctl status
 proofctl release --dry-run --target @thm-main-radius-030
 ```
+
+> Note: `proofctl init` creates a `policies/` directory reference in `.proofctl/config.json`
+> but does not copy any policy files. You must copy the policy file before running
+> `proofctl release`. The default policy path is `policies/weil-release-v1.json`.
 
 ## Build
 

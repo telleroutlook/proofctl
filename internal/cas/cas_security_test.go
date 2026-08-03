@@ -129,6 +129,58 @@ func TestAdversarial_MalformedDigest(t *testing.T) {
 	}
 }
 
+// TestAdversarial_PathTraversal_ExactLength demonstrates that a 64-char digest
+// containing path traversal sequences is rejected with a validation error, not
+// with a file-not-found error from a real open attempt.
+// On UNFIXED code parseDigest only checks length (not charset), so it accepts
+// the payload and the error returned is an OS-level open error — not a validation
+// error — causing the test to FAIL.
+func TestAdversarial_PathTraversal_ExactLength(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, err := cas.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Build a payload that is exactly 64 chars after "sha256:" and embeds "../".
+	traversal := "../../../etc/passwd"
+	padding := strings.Repeat("a", 64-len(traversal))
+	payload := padding + traversal // exactly 64 chars
+	digest := "sha256:" + payload
+
+	_, err = s.Open(digest)
+	if err == nil {
+		t.Fatal("expected error for path-traversal digest, got nil")
+	}
+	// The error must be a validation error, not an OS file-not-found from a real open.
+	if !strings.Contains(err.Error(), "digest") && !strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "hex") {
+		t.Fatalf("error should be a validation error, got: %v", err)
+	}
+}
+
+// TestAdversarial_PathTraversal_UppercaseHex demonstrates that a 64-char digest
+// using uppercase hex characters is rejected with a validation error.
+// On UNFIXED code the error is an OS-level open failure, not a validation error.
+func TestAdversarial_PathTraversal_UppercaseHex(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, err := cas.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 64 uppercase A's — correct length but invalid lowercase hex.
+	digest := "sha256:" + strings.Repeat("A", 64)
+
+	_, err = s.Open(digest)
+	if err == nil {
+		t.Fatal("expected error for uppercase-hex digest, got nil")
+	}
+	// Must be a validation error, not a file-not-found after traversal.
+	if !strings.Contains(err.Error(), "digest") && !strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "hex") {
+		t.Fatalf("error should be a validation error, got: %v", err)
+	}
+}
+
 // TestAdversarial_ConcurrentStore stores 50 identical blobs concurrently
 // (10 goroutines x 5 stores each). All must succeed, exactly one blob file
 // must be on disk, and no data corruption must occur.

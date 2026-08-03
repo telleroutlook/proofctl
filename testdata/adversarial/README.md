@@ -23,11 +23,16 @@ They must never be used as passing inputs.
 
 ## Large/Generated Fixtures
 
-The following fixtures are NOT stored in this directory because they would bloat the
-repository. They are generated in test code directly:
+The following attack vectors test resource limits. They are implemented as in-process
+Go tests rather than static fixture files to avoid bloating the repository:
 
-- **Deep nesting**: a Claim with 10000 entries in `depends_on` — tests resource limits
-- **Large text**: a Claim with 1 MB of repeated characters in `statement.text` — tests size limits
+- **Too many dependencies**: a Claim with `MaxClaimDependencies+1` entries in `depends_on`
+- **Statement text too long**: a Claim with `MaxClaimTextBytes+1` bytes in `statement.text`
+- **Too many evidence refs**: a Claim with `MaxEvidenceRefs+1` entries in `evidence`
+- **Too many claims in graph**: a ProofGraph with `MaxClaimsPerGraph+1` claims
+
+These tests live in `internal/ir/ir_resource_test.go` and exercise the `Validate()` methods
+on `Claim` and `ProofGraph`. All cases are expected to return an error.
 
 ## Policy Context
 

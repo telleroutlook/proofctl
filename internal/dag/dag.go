@@ -22,8 +22,11 @@ func New() *DAG {
 }
 
 // AddClaim adds a claim to the DAG.
-// It returns an error if a claim with the same ID already exists.
+// It returns an error if the claim ID is invalid or if a claim with the same ID already exists.
 func (d *DAG) AddClaim(c *ir.Claim) error {
+	if err := ir.ValidateClaimID(c.ID); err != nil {
+		return fmt.Errorf("dag: %w", err)
+	}
 	if _, exists := d.claims[c.ID]; exists {
 		return fmt.Errorf("dag: duplicate claim ID %q", c.ID)
 	}

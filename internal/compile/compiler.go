@@ -35,6 +35,11 @@ func compileJSON(src []byte) (*ir.ProofGraph, error) {
 		return nil, fmt.Errorf("compile: json decode: %w", err)
 	}
 
+	// Enforce resource limits before structural validation.
+	if err := pg.Validate(); err != nil {
+		return nil, fmt.Errorf("compile: %w", err)
+	}
+
 	if err := validate(&pg); err != nil {
 		return nil, err
 	}

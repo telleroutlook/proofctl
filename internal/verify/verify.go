@@ -53,6 +53,11 @@ func (p *Pipeline) Run(
 	evidence []ir.EvidenceDescriptor,
 	policyDigest string,
 ) (*Result, error) {
+	// Validate claim ID before any path operations (defense in depth).
+	if err := ir.ValidateClaimID(claimID); err != nil {
+		return nil, proofErr.Newf(proofErr.CodeMissingDependency, "%v", err)
+	}
+
 	// 1. Resolve claim.
 	claim := p.DAG.Claim(claimID)
 	if claim == nil {
@@ -224,6 +229,9 @@ func (p *Pipeline) Run(
 // loadCachedAttestation returns the stored attestation for claimID if its
 // CacheKey matches the provided cacheKey; otherwise returns nil.
 func (p *Pipeline) loadCachedAttestation(claimID, cacheKey string) (*ir.Attestation, error) {
+	if err := ir.ValidateClaimID(claimID); err != nil {
+		return nil, fmt.Errorf("verify: %w", err)
+	}
 	path := filepath.Join(p.AttestDir, claimID+".json")
 	f, err := os.Open(path)
 	if err != nil {
@@ -243,7 +251,11 @@ func (p *Pipeline) loadCachedAttestation(claimID, cacheKey string) (*ir.Attestat
 
 // writeAttestationAtomic writes att as JSON to <dir>/<claimID>.json using
 // a temp file + fsync + rename for durability.
+// claimID must pass ir.ValidateClaimID before this function is called.
 func writeAttestationAtomic(dir, claimID string, att *ir.Attestation) error {
+	if err := ir.ValidateClaimID(claimID); err != nil {
+		return fmt.Errorf("verify: %w", err)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}

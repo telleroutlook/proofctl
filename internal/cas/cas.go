@@ -10,10 +10,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/telleroutlook/proofctl/internal/ir"
 )
+
+// hexDigestRe matches exactly 64 lowercase hexadecimal characters.
+// It is used by parseDigest to reject any digest that is not a valid lowercase
+// sha256 hex string, preventing path traversal via crafted digest values.
+var hexDigestRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Store is a content-addressed blob store rooted at a directory.
 type Store struct {
@@ -132,13 +138,15 @@ func (s *Store) blobPath(hexDigest string) string {
 }
 
 // parseDigest validates and strips the "sha256:" prefix from a digest string.
+// It rejects digests that are not exactly 64 lowercase hexadecimal characters,
+// preventing path traversal via crafted digest values.
 func parseDigest(digest string) (string, error) {
 	hex, found := strings.CutPrefix(digest, "sha256:")
 	if !found {
 		return "", fmt.Errorf("cas: unsupported digest algorithm in %q", digest)
 	}
-	if len(hex) != 64 {
-		return "", fmt.Errorf("cas: malformed sha256 digest %q", digest)
+	if !hexDigestRe.MatchString(hex) {
+		return "", fmt.Errorf("cas: invalid sha256 digest %q: must be 64 lowercase hex characters", digest)
 	}
 	return hex, nil
 }

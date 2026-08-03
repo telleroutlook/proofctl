@@ -98,6 +98,50 @@ func checkerOutput(outcome, assurance string) []byte {
 	return data
 }
 
+// TestAdversarial_MaliciousClaimID_PathWrite verifies that Pipeline.Run rejects
+// a claim ID containing path traversal sequences before writing any attestation file.
+// On UNFIXED code writeAttestationAtomic joins the ID directly to a path, which
+// would write the attestation outside the attestation directory.
+func TestAdversarial_MaliciousClaimID_PathWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	attestDir := filepath.Join(dir, "attestations")
+
+	store, desc, _ := makeTestCAS(t)
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+
+	// Build a DAG that contains a claim whose ID embeds a path traversal sequence.
+	maliciousID := "../escaped-payload"
+	g := dag.New()
+	_ = g.AddClaim(&ir.Claim{
+		ID:   maliciousID,
+		Kind: "lemma",
+		Statement: ir.Statement{
+			Text:   "test statement",
+			Digest: "sha256:" + strings.Repeat("a", 64),
+		},
+	})
+
+	p := &Pipeline{
+		DAG:       g,
+		CAS:       store,
+		AttestDir: attestDir,
+		Runner:    &mockRunner{output: checkerOutput("accepted", "deterministic-cap")},
+	}
+
+	_, err := p.Run(context.Background(), maliciousID, checkerID, []ir.EvidenceDescriptor{desc}, "")
+	// Must fail: the malicious ID must be rejected before writing any file.
+	if err == nil {
+		t.Fatal("expected error for malicious claim ID, got nil")
+	}
+
+	// Verify no file escaped the attestation directory.
+	escapedPath := filepath.Join(dir, "escaped-payload.json")
+	if _, statErr := os.Stat(escapedPath); statErr == nil {
+		t.Fatalf("path traversal succeeded: file written outside attestDir at %s", escapedPath)
+	}
+}
+
 func TestCacheHit(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

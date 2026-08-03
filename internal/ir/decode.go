@@ -8,8 +8,26 @@ import (
 	"io"
 )
 
-// maxDecodeBytes is the maximum input size accepted by DecodeStrict (64 MiB).
-const maxDecodeBytes = 64 * 1024 * 1024
+// Resource limit constants for IR decoding and validation.
+const (
+	// MaxInputBytes is the maximum size of a single IR JSON document (64 MiB).
+	MaxInputBytes = 64 * 1024 * 1024
+
+	// MaxClaimDependencies is the maximum number of depends_on entries per claim.
+	MaxClaimDependencies = 1024
+
+	// MaxClaimTextBytes is the maximum length of a statement text field (512 KB).
+	MaxClaimTextBytes = 512 * 1024
+
+	// MaxEvidenceRefs is the maximum number of evidence digest references per claim.
+	MaxEvidenceRefs = 256
+
+	// MaxClaimsPerGraph is the maximum number of claims in a single ProofGraph.
+	MaxClaimsPerGraph = 10_000
+
+	// MaxAssuranceTypes is the maximum length of required_assurance list per claim.
+	MaxAssuranceTypes = 32
+)
 
 // DecodeStrict decodes a single JSON value of type T from r.
 // It rejects unknown fields, rejects duplicate keys, and returns an error if
@@ -18,13 +36,13 @@ func DecodeStrict[T any](r io.Reader) (T, error) {
 	var zero T
 
 	// Buffer the full input with a size limit.
-	lr := io.LimitReader(r, maxDecodeBytes+1)
+	lr := io.LimitReader(r, MaxInputBytes+1)
 	buf, err := io.ReadAll(lr)
 	if err != nil {
 		return zero, fmt.Errorf("decode: read: %w", err)
 	}
-	if len(buf) > maxDecodeBytes {
-		return zero, fmt.Errorf("decode: input exceeds %d byte limit", maxDecodeBytes)
+	if len(buf) > MaxInputBytes {
+		return zero, fmt.Errorf("decode: input exceeds %d byte limit", MaxInputBytes)
 	}
 
 	// Detect duplicate keys at any nesting level.
@@ -125,10 +143,13 @@ func scanArray(dec *json.Decoder) error {
 	return nil
 }
 
-// DecodeClaim decodes a Claim with strict field validation.
+// DecodeClaim decodes a Claim with strict field validation and resource limit checks.
 func DecodeClaim(r io.Reader) (*Claim, error) {
 	c, err := DecodeStrict[Claim](r)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -143,10 +164,13 @@ func DecodeAttestation(r io.Reader) (*Attestation, error) {
 	return &a, nil
 }
 
-// DecodeProofGraph decodes a ProofGraph with strict field validation.
+// DecodeProofGraph decodes a ProofGraph with strict field validation and resource limit checks.
 func DecodeProofGraph(r io.Reader) (*ProofGraph, error) {
 	pg, err := DecodeStrict[ProofGraph](r)
 	if err != nil {
+		return nil, err
+	}
+	if err := pg.Validate(); err != nil {
 		return nil, err
 	}
 	return &pg, nil
