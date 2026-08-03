@@ -51,6 +51,9 @@ type CheckerOutput struct {
 	Explanation string `json:"explanation,omitempty"`
 	// ErrorCode is set when Outcome is "error" or "unavailable".
 	ErrorCode string `json:"error_code,omitempty"`
+	// Metadata is an optional map of domain-specific key-value pairs that are
+	// stored in the attestation. Used by release conditions (required_metadata_keys).
+	Metadata map[string]string `json:"metadata,omitempty"`
 	// Resources reports resource consumption.
 	Resources ResourceUsage `json:"resources"`
 }

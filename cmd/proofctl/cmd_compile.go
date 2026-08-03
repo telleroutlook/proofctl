@@ -21,20 +21,29 @@ import (
 //
 // Usage:
 //
-//	proofctl compile [--adapter weil|json|qmd] <source-file>
+//	proofctl compile [--adapter weil|json|qmd] [--fix-digests] <source-file>
 func cmdCompile(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("compile", flag.ContinueOnError)
 	adapterFlag := fs.String("adapter", "json", "adapter type: json, weil, or qmd")
+	fixDigestsFlag := fs.Bool("fix-digests", false, "compute and fill in zero statement.digest fields before compiling")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, "compile: "+err.Error())
 	}
 	if fs.NArg() == 0 {
-		die(useJSON, errors.CodeInvalidInput, "usage: proofctl compile [--adapter weil|json|qmd] <source-file>")
+		die(useJSON, errors.CodeInvalidInput, "usage: proofctl compile [--adapter weil|json|qmd] [--fix-digests] <source-file>")
 	}
 	srcFile := fs.Arg(0)
 	src, err := os.ReadFile(srcFile)
 	if err != nil {
 		die(useJSON, errors.CodeInvalidInput, "cannot read source file: "+err.Error())
+	}
+
+	// --fix-digests: compute sha256(statement.text) for any all-zero digest, rewrite the source file.
+	if *fixDigestsFlag {
+		src, err = fixStatementDigests(src, srcFile, useJSON)
+		if err != nil {
+			die(useJSON, errors.CodeInvalidInput, "fix-digests: "+err.Error())
+		}
 	}
 
 	cwd, err := os.Getwd()
@@ -158,4 +167,40 @@ func joinInts(nums []int) string {
 		parts[i] = fmt.Sprintf("%d", v)
 	}
 	return strings.Join(parts, ".")
+}
+
+// zeroDigest is the placeholder used in graph templates.
+const zeroDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+// fixStatementDigests parses src as ProofGraph JSON, computes sha256(statement.text)
+// for every claim whose statement.digest is zero, rewrites srcFile, and returns the
+// updated JSON bytes.
+func fixStatementDigests(src []byte, srcFile string, useJSON bool) ([]byte, error) {
+	pg, err := compile.Compile(src, compile.FormatJSON)
+	if err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+
+	fixed := 0
+	for i := range pg.Claims {
+		c := &pg.Claims[i]
+		if c.Statement.Digest == "" || c.Statement.Digest == zeroDigest {
+			c.Statement.Digest = ir.StatementDigest(c.Statement.Text)
+			fixed++
+		}
+	}
+
+	if fixed == 0 {
+		return src, nil
+	}
+
+	data, _ := json.MarshalIndent(pg, "", "  ")
+	data = append(data, '\n')
+	if err := os.WriteFile(srcFile, data, 0o644); err != nil {
+		return nil, fmt.Errorf("write %s: %w", srcFile, err)
+	}
+	if !useJSON {
+		fmt.Printf("fix-digests: computed %d statement digest(s) in %s\n", fixed, srcFile)
+	}
+	return data, nil
 }

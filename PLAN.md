@@ -76,6 +76,71 @@ proofctl 成为数学证明类项目的通用认证基础设施平台。数学�
 
 ---
 
-## 全部已完成 ✅
+## 全部 M1–M5 已完成 ✅
 
-所有 Milestone（M1–M5）已实现并推送至 main。
+---
+
+## Milestone 6 — 打通 verify 端到端 ✅
+
+### T17：`proofctl compile --fix-digests` ✅
+### T18：`proofctl pin checker` ✅
+### T19：`proofctl cas import` ✅
+
+**端到端结果（weil-lower-bound）：**
+```
+PASS lem-path-a-primitives
+PASS lem-path-b-primitives
+PASS lem-ab-intersection
+PASS lem-matrix-reconstruction
+PASS lem-interval-ldlt
+PASS thm-main-radius-030   ← 最终定理通过
+```
+5 个无 checker_policy 的推理性 claim（def-frozen-model, d1-d3, d5）需通过 attestation 手工确认，不是技术故障。
+
+**目标：** `proofctl verify --project` 和 `proofctl release` 在 weil-lower-bound 中完整跑通，
+不再需要任何手工 sha256 计算、CAS 导入或 statement digest 填写。
+
+### T17：`proofctl compile --fix-digests` — statement digest 自动填充
+
+**问题：** weil `graph.json` 里 12 个 claim 的 `statement.digest` 全是占位零。
+proofctl 的缓存键依赖 statement digest，零值导致所有 claim 共享同一 cache key，
+且 CAS verify 步骤会因 digest 不一致而失败。
+
+**改造：** `proofctl compile` 新增 `--fix-digests` flag：
+- 读取 source graph.json
+- 对每个 `statement.digest` 为全零的 claim，计算 `sha256(statement.text)` 并原地回写
+- 然后正常编译到 `.proofctl/graph.json`
+
+### T18：`proofctl pin checker` — checker binary digest + Runtime.Cmd 固定
+
+**问题：** weil `graph.json` 里 `checker_digest` 是占位零，且 `Runtime` 没有命令路径，
+`NativeRunner` 无法找到要执行的 checker（当前 `LookPath("weil-cap-checker-v2")` 必然失败）。
+
+**改造：**
+- `ir.Runtime` 新增 `Cmd []string` 字段（`json:"cmd,omitempty"`）：native 类型的实际执行命令
+- `NativeRunner` 更新：若 `Runtime.Cmd` 非空，使用 `Cmd[0]` 作为解释器，`Cmd[1:]` 作为脚本参数；
+  digest 验证改为验证最后一个文件参数（脚本本身），而非解释器
+- 新增 `proofctl pin checker --cmd "python3 adapters/cap/bridge.py" [--id <checker-id>]`：
+  hash 指定脚本，更新 `checker_digest` 和 `Runtime.Cmd`，回写 graph.json
+
+### T19：`proofctl cas import <file>` — evidence 导入 CAS + size 修正
+
+**问题：** weil `.proofctl/cas/` 为空；`graph.json` evidence 的 `size` 字段均为 0。
+`cas.Store.Verify` 会因 size 不匹配失败，导致 `proofctl verify` 无法运行。
+
+**改造：** 新增 `proofctl cas import <file>` 子命令：
+- 读取文件，计算 SHA-256，存入 `.proofctl/cas/`
+- 在 `.proofctl/graph.json` 里找到 digest 匹配的 evidence 条目，更新 `size` 字段
+- 支持多文件：`proofctl cas import certificates/030/primary/*.json`
+
+---
+
+## 任务顺序（M6）
+
+```
+T17 (fix-digests)  ──→ 独立，最先做（graph.json 正确后其他步骤才有意义）
+T18 (pin checker)  ──→ 依赖 ir.Runtime.Cmd 新字段
+T19 (cas import)   ──→ 独立（只操作 CAS + evidence size）
+T17+T18+T19 完成后 ──→ proofctl verify --project 可在 weil-lower-bound 跑通
+```
+

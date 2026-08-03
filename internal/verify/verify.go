@@ -208,6 +208,9 @@ func (p *Pipeline) Run(
 		att.Resources.WallMillis = checkerOut.Resources.WallMillis
 		att.Resources.CPUMillis = checkerOut.Resources.CPUMillis
 		att.Resources.MemBytes = checkerOut.Resources.MemBytes
+		if len(checkerOut.Metadata) > 0 {
+			att.Metadata = checkerOut.Metadata
+		}
 	}
 
 	// Compute self-digest (zero out field first).

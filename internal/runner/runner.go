@@ -108,16 +108,30 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 		lookup = exec.LookPath
 	}
 
-	binPath, err := lookup(checkerID.ID)
-	if err != nil {
-		return nil, &RunError{
-			Code:    ExitUnavailable,
-			Stderr:  fmt.Sprintf("checker %q not found", checkerID.ID),
-			Wrapped: err,
+	// Determine the command to run.
+	// If Runtime.Cmd is set, use it directly (Cmd[0] is the interpreter,
+	// Cmd[1:] are the script and any fixed args).
+	// Otherwise fall back to looking up checkerID.ID as a binary.
+	var argv []string
+	var digestTarget string // file whose digest is verified
+	if len(checkerID.Runtime.Cmd) > 0 {
+		argv = checkerID.Runtime.Cmd
+		// Verify digest of the last element (the script), not the interpreter.
+		digestTarget = checkerID.Runtime.Cmd[len(checkerID.Runtime.Cmd)-1]
+	} else {
+		binPath, err := lookup(checkerID.ID)
+		if err != nil {
+			return nil, &RunError{
+				Code:    ExitUnavailable,
+				Stderr:  fmt.Sprintf("checker %q not found", checkerID.ID),
+				Wrapped: err,
+			}
 		}
+		argv = []string{binPath}
+		digestTarget = binPath
 	}
 
-	if err := verifyBinaryDigest(binPath, checkerID.CheckerDigest); err != nil {
+	if err := verifyBinaryDigest(digestTarget, checkerID.CheckerDigest); err != nil {
 		return nil, &RunError{
 			Code:    ExitUnavailable,
 			Stderr:  err.Error(),
@@ -125,8 +139,8 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 		}
 	}
 
-	//nolint:gosec // Native runner is dev-only; binary path is resolved via lookup.
-	cmd := exec.CommandContext(ctx, binPath)
+	//nolint:gosec // argv is resolved from pinned CheckerIdentity, not user input.
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdin = input
 	if r.Env != nil {
 		cmd.Env = r.Env

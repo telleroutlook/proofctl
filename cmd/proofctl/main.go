@@ -14,6 +14,8 @@
 //	frontier  List the unresolved direct dependencies of a claim
 //	impact    List claims that depend on a given claim
 //	cache     Manage the checker result cache
+//	cas       Manage the content-addressed store (import|list)
+//	pin       Pin a checker binary digest and command (pin checker --cmd ...)
 //	release   Run the release gate
 //	status    Print the current proof graph status
 //	snapshot  Write a point-in-time snapshot of claims + statuses
@@ -68,6 +70,10 @@ func main() {
 		cmdImpact(subargs, *jsonFlag)
 	case "cache":
 		cmdCache(subargs, *jsonFlag)
+	case "cas":
+		cmdCas(subargs, *jsonFlag)
+	case "pin":
+		cmdPin(subargs, *jsonFlag)
 	case "domains":
 		cmdDomains(subargs, *jsonFlag)
 	case "env":

@@ -40,6 +40,8 @@ from pathlib import Path
 
 PROTOCOL_VERSION = 1
 
+_EMPTY_RESOURCES = {"wall_millis": 0, "cpu_millis": 0, "mem_bytes": 0}
+
 
 def _read_input() -> dict:
     try:
@@ -48,20 +50,36 @@ def _read_input() -> dict:
         _die(2, f"malformed CheckerInput JSON: {e}")
 
 
-def _die(exit_code: int, message: str) -> None:
-    out = {
+def _out(claim_id: str, outcome: str, assurance: str = "",
+         explanation: str = "", error_code: str = "",
+         metadata: dict = None) -> dict:
+    """Build a protocol-compliant CheckerOutput dict."""
+    o = {
         "protocol_version": PROTOCOL_VERSION,
-        "outcome": "error",
-        "error": {"code": "malformed_input", "message": message},
+        "claim_id": claim_id,
+        "outcome": outcome,
+        "assurance": assurance,
+        "resources": _EMPTY_RESOURCES,
     }
+    if explanation:
+        o["explanation"] = explanation
+    if error_code:
+        o["error_code"] = error_code
+    if metadata:
+        o["metadata"] = metadata
+    return o
+
+
+def _die(exit_code: int, message: str) -> None:
+    out = _out("", "error", error_code="malformed_input", explanation=message)
     json.dump(out, sys.stdout)
     sys.exit(exit_code)
 
 
-def _find_certificate(evidence: list[dict]) -> Path | None:
+def _find_certificate(evidence: list) -> Path | None:
     """Return the path of the first evidence item that looks like a certificate."""
     for item in evidence:
-        hint = item.get("path_hint", "")
+        hint = item.get("local_path", "") or item.get("path_hint", "")
         media = item.get("media_type", "")
         if hint.endswith(".json") or "certificate" in media or "certificate" in hint:
             p = Path(hint)
@@ -70,20 +88,11 @@ def _find_certificate(evidence: list[dict]) -> Path | None:
     return None
 
 
-def _read_format_version(cert_path: Path) -> str:
+def _read_cert_field(cert_path: Path, field: str) -> str:
     try:
         with open(cert_path) as f:
             data = json.load(f)
-        return str(data.get("format_version", ""))
-    except Exception:
-        return ""
-
-
-def _read_margin_ratio(cert_path: Path) -> str:
-    try:
-        with open(cert_path) as f:
-            data = json.load(f)
-        v = data.get("margin_ratio", "")
+        v = data.get(field, "")
         return str(v) if v else ""
     except Exception:
         return ""
@@ -96,30 +105,20 @@ def main() -> None:
 
     inp = _read_input()
     claim_id: str = inp.get("claim_id", "")
-    evidence: list[dict] = inp.get("evidence", [])
+    evidence: list = inp.get("evidence", [])
 
     cert_path = _find_certificate(evidence)
     if cert_path is None:
-        out = {
-            "protocol_version": PROTOCOL_VERSION,
-            "outcome": "rejected",
-            "assurance": "deterministic-cap",
-            "error": {
-                "code": "evidence_not_found",
-                "message": "no certificate JSON found in evidence paths",
-            },
-        }
-        json.dump(out, sys.stdout)
+        json.dump(_out(claim_id, "rejected", "deterministic-cap",
+                       error_code="evidence_not_found",
+                       explanation="no certificate JSON found in evidence paths"),
+                  sys.stdout)
         sys.exit(0)
 
     # Invoke domain checker.
     cmd = checker_cmd.split() + [str(cert_path)]
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True)
     except FileNotFoundError as e:
         _die(2, f"checker not found: {e}")
     except Exception as e:
@@ -128,34 +127,21 @@ def main() -> None:
     checker_exit = result.returncode
 
     if checker_exit == 2:
-        # Malformed certificate — surface as error.
-        out = {
-            "protocol_version": PROTOCOL_VERSION,
-            "outcome": "error",
-            "error": {
-                "code": "malformed_certificate",
-                "message": result.stderr.strip() or "certificate schema violation (exit 2)",
-            },
-        }
-        json.dump(out, sys.stdout)
+        json.dump(_out(claim_id, "error",
+                       error_code="malformed_certificate",
+                       explanation=result.stderr.strip() or "certificate schema violation (exit 2)"),
+                  sys.stdout)
         sys.exit(0)
 
     if checker_exit != 0:
-        # Checker rejected the proof.
-        out = {
-            "protocol_version": PROTOCOL_VERSION,
-            "outcome": "rejected",
-            "assurance": "deterministic-cap",
-            "error": {
-                "code": "proof_rejected",
-                "message": result.stderr.strip() or f"checker exit {checker_exit}",
-            },
-        }
-        json.dump(out, sys.stdout)
+        json.dump(_out(claim_id, "rejected", "deterministic-cap",
+                       error_code="proof_rejected",
+                       explanation=result.stderr.strip() or f"checker exit {checker_exit}"),
+                  sys.stdout)
         sys.exit(0)
 
     # exit 0 — CERTIFIED. Build metadata.
-    metadata: dict[str, str] = {
+    metadata: dict = {
         "digests_fresh": "true",
         "path_keys_match": "true",
         "intervals_intersect": "true",
@@ -163,11 +149,11 @@ def main() -> None:
         "ldlt_passes": "true",
     }
 
-    fmt_ver = _read_format_version(cert_path)
+    fmt_ver = _read_cert_field(cert_path, "format_version")
     if fmt_ver:
         metadata["cap_format_version"] = fmt_ver
 
-    margin = _read_margin_ratio(cert_path)
+    margin = _read_cert_field(cert_path, "margin_ratio")
     if margin:
         metadata["pivot_radius_ratio"] = margin
 
@@ -177,13 +163,8 @@ def main() -> None:
     if "even" in cid_lower:
         metadata["even_sector_passes"] = "true"
 
-    out = {
-        "protocol_version": PROTOCOL_VERSION,
-        "outcome": "accepted",
-        "assurance": "deterministic-cap",
-        "metadata": metadata,
-    }
-    json.dump(out, sys.stdout)
+    json.dump(_out(claim_id, "accepted", "deterministic-cap", metadata=metadata),
+              sys.stdout)
     sys.exit(0)
 
 
