@@ -19,6 +19,9 @@ type ReleasePolicy struct {
 	// and non-empty in at least one attestation for a release to pass.
 	// This replaces the former hardcoded Weil-specific C04-C12 conditions.
 	RequiredMetadataKeys []string `json:"required_metadata_keys,omitempty"`
+	// RequireSignedAttestations activates C05: all attestations must carry a
+	// valid Ed25519 signature. Unsigned attestations are rejected at release.
+	RequireSignedAttestations bool `json:"require_signed_attestations,omitempty"`
 }
 
 // Evaluate checks whether all required claims are accepted, no forbidden assurance types

@@ -120,6 +120,14 @@ type Attestation struct {
 	SelfDigest        string               `json:"self_digest"`
 	CacheKey          string               `json:"cache_key,omitempty"`
 	Metadata          map[string]string    `json:"metadata,omitempty"`
+	Signature         *AttestationSig      `json:"signature,omitempty"`
+}
+
+// AttestationSig is the optional Ed25519 signature embedded in an attestation.
+type AttestationSig struct {
+	PubkeyFingerprint string `json:"pubkey_fingerprint"`
+	Algorithm         string `json:"algorithm"`
+	Value             string `json:"value"` // base64-encoded signature bytes
 }
 
 // ResourceStats captures resource consumption for a single checker invocation.

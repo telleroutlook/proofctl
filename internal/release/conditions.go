@@ -18,6 +18,7 @@ const (
 	CondAssumptionFootprintEmpty ConditionID = "C02-assumption-footprint-empty"
 	CondAllAssurancesAllowed     ConditionID = "C03-assurances-allowed"
 	CondReplayConsistency        ConditionID = "C04-replay-consistency"
+	CondAttestationSignatures    ConditionID = "C05-attestation-signatures"
 )
 
 // ConditionResult records whether one release condition passed.
@@ -31,18 +32,21 @@ type ConditionResult struct {
 // domain-specific metadata key conditions declared in the policy.
 // Universal conditions: C01 (all claims accepted), C02 (no assumption assurance),
 // C03 (assurances allowed), C04 (replay consistency).
-// Domain conditions: one condition per key in pol.RequiredMetadataKeys,
-// named "meta:<key>" — passes if any attestation carries a non-empty value for that key.
+// Conditional: C05 (attestation signatures) — only when policy.RequireSignedAttestations.
+// Domain conditions: one condition per key in pol.RequiredMetadataKeys.
 func EvaluateConditions(
 	graph *dag.DAG,
 	attestations map[string]*ir.Attestation,
 	pol policy.ReleasePolicy,
 ) []ConditionResult {
-	results := make([]ConditionResult, 0, 4+len(pol.RequiredMetadataKeys))
+	results := make([]ConditionResult, 0, 5+len(pol.RequiredMetadataKeys))
 	results = append(results, checkC01GlobalStatus(graph, attestations))
 	results = append(results, checkC02AssumptionFootprint(attestations))
 	results = append(results, checkC03AssurancesAllowed(attestations, pol))
 	results = append(results, checkC04ReplayConsistency(graph, attestations))
+	if pol.RequireSignedAttestations {
+		results = append(results, checkC05AttestationSignatures(attestations))
+	}
 	for _, key := range pol.RequiredMetadataKeys {
 		results = append(results, checkMetadataKey(attestations, key))
 	}
@@ -191,4 +195,23 @@ func checkMetadataKey(attestations map[string]*ir.Attestation, key string) Condi
 		}
 	}
 	return ConditionResult{ID: id, Passed: true}
+}
+
+// checkC05AttestationSignatures verifies that every attestation carries a signature.
+// Unsigned attestations fail this condition when policy.RequireSignedAttestations is true.
+func checkC05AttestationSignatures(attestations map[string]*ir.Attestation) ConditionResult {
+	var unsigned []string
+	for id, att := range attestations {
+		if att.Signature == nil || att.Signature.Value == "" {
+			unsigned = append(unsigned, id)
+		}
+	}
+	if len(unsigned) > 0 {
+		return ConditionResult{
+			ID:      CondAttestationSignatures,
+			Passed:  false,
+			Blocker: "C05: unsigned attestations: " + strings.Join(unsigned, ", "),
+		}
+	}
+	return ConditionResult{ID: CondAttestationSignatures, Passed: true}
 }

@@ -269,7 +269,120 @@ func TestC04_PartialFreshness(t *testing.T) {
 	}
 }
 
-// TestBuildClaimSummary verifies that Release STATUS.json reflects the correct claim counts.
+// TestC05_AllSigned verifies that C05 passes when all attestations have a signature.
+func TestC05_AllSigned(t *testing.T) {
+	t.Parallel()
+	g := coverBuildGraph(t, "c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:   "c1",
+			Outcome:   string(ir.StatusAccepted),
+			Assurance: ir.AssuranceFormalKernel,
+			Signature: &ir.AttestationSig{
+				PubkeyFingerprint: "abcd1234abcd1234",
+				Algorithm:         "ed25519",
+				Value:             "c2lnbmF0dXJl",
+			},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:                   "v1",
+		RequireSignedAttestations: true,
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	// With RequireSignedAttestations, we get 5 conditions.
+	c05 := results[4]
+	if c05.ID != release.CondAttestationSignatures {
+		t.Fatalf("results[4].ID = %q, want C05", c05.ID)
+	}
+	if !c05.Passed {
+		t.Errorf("C05 should pass when all attestations are signed, blocker: %s", c05.Blocker)
+	}
+}
+
+// TestC05_Unsigned verifies that C05 fails when an attestation has no signature.
+func TestC05_Unsigned(t *testing.T) {
+	t.Parallel()
+	g := coverBuildGraph(t, "c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:   "c1",
+			Outcome:   string(ir.StatusAccepted),
+			Assurance: ir.AssuranceFormalKernel,
+			// No Signature field.
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:                   "v1",
+		RequireSignedAttestations: true,
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c05 := results[4]
+	if c05.Passed {
+		t.Error("C05 should fail when attestation has no signature")
+	}
+	if c05.Blocker == "" {
+		t.Error("C05 blocker should not be empty for unsigned attestation")
+	}
+}
+
+// TestC05_NotActivatedWithoutPolicy verifies that C05 is not evaluated when
+// RequireSignedAttestations is false (default).
+func TestC05_NotActivatedWithoutPolicy(t *testing.T) {
+	t.Parallel()
+	g := coverBuildGraph(t, "c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {ClaimID: "c1", Outcome: string(ir.StatusAccepted), Assurance: ir.AssuranceFormalKernel},
+	}
+	pol := policy.ReleasePolicy{
+		Version: "v1",
+		// RequireSignedAttestations is false (default) — C05 should not appear.
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	for _, r := range results {
+		if r.ID == release.CondAttestationSignatures {
+			t.Error("C05 should not be evaluated when RequireSignedAttestations is false")
+		}
+	}
+	if len(results) != 4 {
+		t.Errorf("expected 4 conditions (no C05), got %d", len(results))
+	}
+}
+
+// TestRelease_C05BlocksRelease verifies that release fails when
+// RequireSignedAttestations is true and attestations are unsigned.
+func TestRelease_C05BlocksRelease(t *testing.T) {
+	t.Parallel()
+	outDir := t.TempDir()
+	g := &release.Gate{OutputDir: outDir}
+
+	graph := coverBuildGraph(t, "c1")
+	atts := map[string]*ir.Attestation{
+		"c1": coverAtt("c1"), // no Signature field
+	}
+	pol := policy.ReleasePolicy{
+		Version:                   "v1",
+		Target:                    "c1",
+		RequireSignedAttestations: true,
+	}
+
+	pass, blockers, err := g.Release(graph, atts, pol, nil)
+	if err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if pass {
+		t.Error("release should fail when C05 requires signatures but attestation is unsigned")
+	}
+	found := false
+	for _, b := range blockers {
+		if len(b) > 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected non-empty blockers, got: %v", blockers)
+	}
+}
 func TestBuildClaimSummary(t *testing.T) {
 	t.Parallel()
 	outDir := t.TempDir()

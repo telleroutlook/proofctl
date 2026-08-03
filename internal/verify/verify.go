@@ -17,15 +17,18 @@ import (
 	"github.com/telleroutlook/proofctl/internal/freshness"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/runner"
+	"github.com/telleroutlook/proofctl/internal/signing"
 	"github.com/telleroutlook/proofctl/pkg/protocol"
 )
 
 // Pipeline runs the full verification pipeline for one claim.
 type Pipeline struct {
-	DAG       *dag.DAG
-	CAS       *cas.Store
-	AttestDir string // directory for attestation JSON files
-	Runner    runner.Runner
+	DAG        *dag.DAG
+	CAS        *cas.Store
+	AttestDir  string // directory for attestation JSON files
+	Runner     runner.Runner
+	SigningKey *signing.Key // optional; if set, attestations are signed on write
+	TrustStore string       // directory of *.pub key files; used to verify loaded attestations
 }
 
 // Result is returned by Pipeline.Run.
@@ -221,6 +224,19 @@ func (p *Pipeline) Run(
 	}
 	att.SelfDigest = selfDigest
 
+	// Sign attestation if a signing key is configured (T26).
+	if p.SigningKey != nil {
+		sig, signErr := p.SigningKey.Sign(att)
+		if signErr != nil {
+			return nil, proofErr.Newf(proofErr.CodeInternalError, "sign attestation: %v", signErr)
+		}
+		att.Signature = &ir.AttestationSig{
+			PubkeyFingerprint: sig.PubkeyFingerprint,
+			Algorithm:         sig.Algorithm,
+			Value:             sig.Value,
+		}
+	}
+
 	// Write attestation atomically.
 	if err := writeAttestationAtomic(p.AttestDir, claimID, att); err != nil {
 		return nil, proofErr.Newf(proofErr.CodeInternalError, "write attestation: %v", err)
@@ -248,6 +264,12 @@ func (p *Pipeline) loadCachedAttestation(claimID, cacheKey string) (*ir.Attestat
 	}
 	if att.CacheKey != cacheKey {
 		return nil, fmt.Errorf("cache key mismatch")
+	}
+	// Verify signature if present and trust store is configured (T27).
+	if att.Signature != nil && p.TrustStore != "" {
+		if verifyErr := p.verifyAttestationSig(att); verifyErr != nil {
+			return nil, fmt.Errorf("signature-invalid: %w", verifyErr)
+		}
 	}
 	return att, nil
 }
@@ -292,6 +314,37 @@ func writeAttestationAtomic(dir, claimID string, att *ir.Attestation) error {
 		return fmt.Errorf("rename: %w", err)
 	}
 	return nil
+}
+
+// verifyAttestationSig loads the public key matching att.Signature.PubkeyFingerprint
+// from TrustStore and verifies the signature.
+func (p *Pipeline) verifyAttestationSig(att *ir.Attestation) error {
+	if att.Signature == nil {
+		return nil
+	}
+	entries, err := os.ReadDir(p.TrustStore)
+	if err != nil {
+		return fmt.Errorf("read trust store: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || len(e.Name()) < 4 || e.Name()[len(e.Name())-4:] != ".pub" {
+			continue
+		}
+		k, err := signing.LoadPublic(filepath.Join(p.TrustStore, e.Name()))
+		if err != nil {
+			continue
+		}
+		if k.ID != att.Signature.PubkeyFingerprint {
+			continue
+		}
+		sig := signing.Signature{
+			PubkeyFingerprint: att.Signature.PubkeyFingerprint,
+			Algorithm:         att.Signature.Algorithm,
+			Value:             att.Signature.Value,
+		}
+		return signing.Verify(k, att, sig)
+	}
+	return fmt.Errorf("no public key found for fingerprint %q in trust store", att.Signature.PubkeyFingerprint)
 }
 
 // parseCheckerOutput decodes and validates the checker's stdout payload.

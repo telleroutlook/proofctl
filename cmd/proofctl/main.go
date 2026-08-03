@@ -98,6 +98,8 @@ func main() {
 		cmdSnapshot(subargs, *jsonFlag)
 	case "doctor":
 		cmdDoctor(subargs, *jsonFlag)
+	case "key":
+		cmdKey(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -129,6 +131,7 @@ Subcommands:
   release   Run the release gate
   snapshot  Write a point-in-time snapshot of claims + statuses
   doctor    Check that the proofctl environment is ready (PATH, project, checker, CAS)
+  key       Manage signing keys (generate|list)
   status    Print the current proof graph status
 
 Flags:

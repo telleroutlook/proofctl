@@ -18,6 +18,7 @@ import (
 	errors "github.com/telleroutlook/proofctl/internal/errors"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/runner"
+	"github.com/telleroutlook/proofctl/internal/signing"
 	"github.com/telleroutlook/proofctl/internal/verify"
 )
 
@@ -46,10 +47,12 @@ func cmdVerify(args []string, useJSON bool) {
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
 	nr := &runner.NativeRunner{ProjectRoot: root}
 	pipe := &verify.Pipeline{
-		DAG:       g,
-		CAS:       store,
-		AttestDir: attestDir,
-		Runner:    nr,
+		DAG:        g,
+		CAS:        store,
+		AttestDir:  attestDir,
+		Runner:     nr,
+		SigningKey: loadSigningKeyIfSet(),
+		TrustStore: filepath.Join(root, config.DirName, "keys"),
 	}
 
 	type verifyResult struct {
@@ -245,4 +248,20 @@ func checkDependencyDrift(projectRoot string, checkerID ir.CheckerIdentity) stri
 			relPath, pinned[:16]+"…", current[:16]+"…", relPath)
 	}
 	return ""
+}
+
+// loadSigningKeyIfSet loads the private key from PROOFCTL_SIGNING_KEY env var,
+// or from .proofctl/keys/default.priv if the env var is not set.
+// Returns nil (no signing) if neither exists.
+func loadSigningKeyIfSet() *signing.Key {
+	path := os.Getenv("PROOFCTL_SIGNING_KEY")
+	if path == "" {
+		return nil
+	}
+	k, err := signing.LoadPrivate(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warn: cannot load signing key %s: %v\n", path, err)
+		return nil
+	}
+	return k
 }
