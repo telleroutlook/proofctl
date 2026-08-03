@@ -205,7 +205,30 @@ which items passed.
 ```bash
 proofctl status             # human-readable
 proofctl status --verbose   # includes toolchain versions for accepted claims
-proofctl --json status      # machine-readable JSON with open_reason and unverified_digest fields
+proofctl --json status      # machine-readable JSON: status, assurance, start_freshness,
+                            # end_freshness, evidence_count per claim + open_reason/block_reason
+```
+
+## Checker Commands
+
+```bash
+proofctl check @<claim-id>                          # run checker against CAS evidence
+proofctl check --all                                # run all claims with a checker_policy
+proofctl check --no-cache @<claim>                  # force re-run, skip cache
+proofctl check --evidence sha256:<d> @<claim>       # run checker for one evidence item only
+```
+
+The `--evidence` flag is useful when a claim has multiple certs (e.g. odd + even sectors)
+and you want per-cert metadata independently before merging.
+
+## CAS Management
+
+```bash
+proofctl cas import <file> [file ...]               # import evidence (shows EXISTS if already present)
+proofctl cas import-dir <dir> --pattern "*.json"    # bulk import matching files
+proofctl cas list                                   # list all stored blobs
+proofctl cas gc --dry-run                           # preview unreferenced blobs
+proofctl cas gc --yes                               # delete unreferenced blobs (skips confirmation prompt)
 ```
 
 ## Environment Checks

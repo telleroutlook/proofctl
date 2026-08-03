@@ -964,5 +964,10 @@ T35 (push/pull)        ──→ 依赖 T34
 
 - v0.2.0：功能修复和错误信息增强
 - v0.2.1：工具链强化（lint、CI、pre-commit、测试）
+- v0.2.2–v0.2.3：B4–B11、E3–E7、F5–F8（attest 增强、cas import-dir、check --all、cache 管理）
+- v0.2.4：B12–B15、E6–E11、F9–F15（export、graph filter、replay --dry-run、snapshot --diff）
+- v0.2.5：GitHub Actions release workflow 竞态修复
+- v0.2.6：B18（metadata 覆盖）、B19（self_digest 缺失）、B20（release --fix 误报）、E12（check --evidence）、E13（cas gc 确认）
+- v0.2.7：B22（bridge.py 从 checker stdout 提取 pivot_radius_ratio）
 
-
+**当前版本：v0.2.7**（2026-08-04）

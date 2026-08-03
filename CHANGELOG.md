@@ -6,6 +6,65 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.2.7] — 2026-08-04
+
+### Fixed
+
+- **B22**: `bridge.py` now extracts `pivot_radius_ratio` from checker stdout when the
+  certificate lacks a top-level `margin_ratio` field (v2 cert format). Falls back from
+  cert field → JSON stdout parse → key=value regex scan. Both `adapters/cap/bridge.py`
+  and `internal/scaffold/bridge.py` updated in sync.
+
+---
+
+## [v0.2.6] — 2026-08-04
+
+### Fixed
+
+- **B18**: `verify/Pipeline`: multi-evidence claims now run the checker once per evidence
+  item and union all metadata keys. Fixes `even_sector_passes`/`odd_sector_passes` being
+  overwritten by the last evidence run.
+- **B19**: `replay` and `replay --batch`: attestation `self_digest` is now computed and
+  written before the attestation file is saved. Fixes C04 reporting `missing: self_digest`.
+- **B20**: `release --fix`: attestations are reloaded after C04 repair so subsequent
+  condition evaluation (C01 etc.) sees the updated state; fixes false "not accepted"
+  reports for claims that were already accepted.
+
+### Added
+
+- **E12**: `proofctl check --evidence <digest>` — run checker for a single evidence
+  item only; useful when a claim has multiple certs and you want per-cert metadata.
+- **E13**: `proofctl cas gc` now requires confirmation before deleting blobs. Pass
+  `--yes` to skip the prompt. `--dry-run` and `--json` mode are unaffected.
+
+---
+
+## [v0.2.5] — 2026-08-03
+
+### Fixed
+
+- GitHub Actions release workflow race: split into `create-release` + `build-upload`
+  two-phase job so parallel matrix builds no longer conflict creating the release.
+
+---
+
+## [v0.2.4] — 2026-08-03
+
+### Added / Fixed (B12–B15, E6–E11, F9–F15)
+
+- `proofctl export --format lean` — export an accepted claim to a cross-domain Lean 4 stub
+- `proofctl graph --status-filter` — filter nodes by status in `--mermaid` output
+- `proofctl attest --from-replay` / `--from-check` — create attestation from cached result
+- `proofctl replay --reuse-generated <dir>` — skip generator step and reuse pre-built certs
+- `proofctl replay --dry-run` — validate CAS state and generator syntax without executing
+- `proofctl check --all` cache-hit annotation with key prefix and invalidation hint
+- `cas.Store` returns whether blob was already present (idempotent imports)
+- `--json` output for `release --dry-run` (E14 completed in v0.2.6)
+- `.proofctl/env.json` auto-loaded before flag parsing for zero-config environments
+- `proofctl snapshot --diff <a> <b>` — compare two snapshot files
+
+---
+
 ## [v0.1.0] — 2026-08-03
 
 First tagged release. Covers Milestones 1–7 of the platform roadmap.
