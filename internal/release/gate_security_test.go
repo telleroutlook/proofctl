@@ -195,13 +195,17 @@ func TestAdversarial_ConcurrentRelease(t *testing.T) {
 		t.Fatalf("STATUS.json is invalid JSON after concurrent releases: %v", err)
 	}
 
-	// No temp files must remain.
+	// No temp files must remain (STATUS.json and release-snapshot.json are expected outputs).
+	expectedFiles := map[string]bool{
+		release.StatusFile:   true,
+		release.SnapshotFile: true,
+	}
 	entries, err := os.ReadDir(outDir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
 	for _, e := range entries {
-		if e.Name() != release.StatusFile {
+		if !expectedFiles[e.Name()] {
 			t.Errorf("unexpected leftover file after concurrent releases: %q", e.Name())
 		}
 	}

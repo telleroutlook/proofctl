@@ -131,13 +131,13 @@ Subcommands:
   graph     Print the claim dependency graph (--dot, --mermaid)
   frontier  List unresolved direct dependencies of a claim
   impact    List claims that depend on a given claim
-  cache     Manage the checker result cache (audit|invalidate|show-key)
-  cas       Manage the content-addressed store (import|import-dir|list)
+  cache     Manage the checker result cache (audit|invalidate [--all]|show-key)
+  cas       Manage the content-addressed store (import|import-dir|list|gc)
   pin       Pin a checker binary digest and command (pin checker --cmd ...)
-  env       Manage checker runtime environment (verify|snapshot --force)
-  replay    Cold-start generator+checker replay for a claim
-  release   Run the release gate (--dry-run)
-  snapshot  Write a point-in-time snapshot of claims + statuses
+  env       Manage checker runtime environment (verify|snapshot|show)
+  replay    Cold-start generator+checker replay (--batch, --skip-if-accepted)
+  release   Run the release gate (--dry-run, --fix)
+  snapshot  Write a point-in-time snapshot of claims + statuses (--diff)
   doctor    Check that the proofctl environment is ready (PATH, project, checker, CAS)
   key       Manage signing keys (generate|list)
   export    Export an accepted claim to a cross-domain format (--format lean)

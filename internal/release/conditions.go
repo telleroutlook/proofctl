@@ -147,11 +147,18 @@ func checkC03AssurancesAllowed(attestations map[string]*ir.Attestation, pol poli
 	return ConditionResult{ID: CondAllAssurancesAllowed, Passed: true}
 }
 
-// checkC04ReplayConsistency checks that every attestation has non-empty
-// SelfDigest and StartFreshness/EndFreshness (proxy for recorded replay).
+// checkC04ReplayConsistency checks that every claim with a checker_policy has
+// non-empty SelfDigest and StartFreshness/EndFreshness (proxy for recorded
+// replay or check). Claims without a checker_policy (manual attest) are exempt
+// because they have no generator and the freshness is now auto-populated by
+// proofctl attest.
 func checkC04ReplayConsistency(graph *dag.DAG, attestations map[string]*ir.Attestation) ConditionResult {
 	var missing []string
 	for _, c := range graph.Claims() {
+		// Claims without a checker_policy are manually attested; skip freshness check.
+		if c.CheckerPolicy == "" {
+			continue
+		}
 		att, ok := attestations[c.ID]
 		if !ok {
 			missing = append(missing, fmt.Sprintf("%s(no attestation)", c.ID))
@@ -175,7 +182,7 @@ func checkC04ReplayConsistency(graph *dag.DAG, attestations map[string]*ir.Attes
 		return ConditionResult{
 			ID:      CondReplayConsistency,
 			Passed:  false,
-			Blocker: "C04: replay consistency missing for: " + strings.Join(missing, ", ") + " — run 'proofctl replay' (not 'proofctl check') to populate freshness fields",
+			Blocker: "C04: replay consistency missing for: " + strings.Join(missing, ", ") + " — run 'proofctl check' or 'proofctl replay' to populate freshness fields",
 		}
 	}
 	return ConditionResult{ID: CondReplayConsistency, Passed: true}

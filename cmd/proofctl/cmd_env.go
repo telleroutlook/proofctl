@@ -26,15 +26,17 @@ type envLock struct {
 
 func cmdEnv(args []string, useJSON bool) {
 	if len(args) == 0 {
-		die(useJSON, errors.CodeInvalidInput, "usage: proofctl env <verify|snapshot>")
+		die(useJSON, errors.CodeInvalidInput, "usage: proofctl env <verify|snapshot|show>")
 	}
 	switch args[0] {
 	case "verify":
 		cmdEnvVerify(args[1:], useJSON)
 	case "snapshot":
 		cmdEnvSnapshot(args[1:], useJSON)
+	case "show":
+		cmdEnvShow(useJSON)
 	default:
-		die(useJSON, errors.CodeInvalidInput, "unknown env subcommand "+args[0]+"; use verify or snapshot")
+		die(useJSON, errors.CodeInvalidInput, "unknown env subcommand "+args[0]+"; use verify, snapshot, or show")
 	}
 }
 
@@ -200,13 +202,15 @@ func cmdEnvSnapshot(args []string, useJSON bool) {
 	fmt.Printf("Run 'proofctl env verify --lock %s' to check the environment.\n", *outFlag)
 }
 
-// autoLoadEnv reads .proofctl/env in the nearest project root and sets any
-// KEY=VALUE lines as environment variables, skipping already-set variables.
+// autoLoadEnv reads .proofctl/env.json (JSON object) and/or .proofctl/env
+// (KEY=VALUE text) in the nearest project root and sets any unset variables.
+// env.json is tried first; the plain env file is also applied (both can coexist).
 // It is called at startup so that BRIDGE_CHECKER, PROOFCTL_ADAPTERS, etc.
 // don't need to be re-exported every session.
 //
-// File format: one KEY=VALUE per line; blank lines and lines starting with #
-// are ignored. Values may optionally be quoted with single or double quotes.
+// env.json format: {"KEY": "value", ...}
+// env format: one KEY=VALUE per line; blank lines and # comments ignored.
+// Values may optionally be quoted with single or double quotes.
 func autoLoadEnv() {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -216,10 +220,25 @@ func autoLoadEnv() {
 	if err != nil {
 		return
 	}
+
+	// Try .proofctl/env.json (JSON object {"KEY": "value"}).
+	jsonEnvFile := filepath.Join(root, config.DirName, "env.json")
+	if data, err := os.ReadFile(jsonEnvFile); err == nil {
+		var m map[string]string
+		if err := json.Unmarshal(data, &m); err == nil {
+			for key, val := range m {
+				if os.Getenv(key) == "" {
+					_ = os.Setenv(key, val)
+				}
+			}
+		}
+	}
+
+	// Also try .proofctl/env (KEY=VALUE plain text).
 	envFile := filepath.Join(root, config.DirName, "env")
 	data, err := os.ReadFile(envFile)
 	if err != nil {
-		return // no env file — silently skip
+		return // no plain env file — silently skip
 	}
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
@@ -241,6 +260,76 @@ func autoLoadEnv() {
 		// Only set if not already in environment.
 		if os.Getenv(key) == "" {
 			_ = os.Setenv(key, val)
+		}
+	}
+}
+
+// cmdEnvShow displays the proofctl environment variables and their sources.
+func cmdEnvShow(useJSON bool) {
+	keys := []string{"BRIDGE_CHECKER", "PROOFCTL_ADAPTERS", "PROOFCTL_SIGNING_KEY"}
+
+	// Determine which sources exist.
+	cwd, _ := os.Getwd()
+	root, _ := findProjectRoot(cwd)
+
+	type envEntry struct {
+		Key    string `json:"key"`
+		Value  string `json:"value"`
+		Source string `json:"source"`
+		Set    bool   `json:"set"`
+	}
+
+	var entries []envEntry
+	for _, k := range keys {
+		val := os.Getenv(k)
+		source := "environment"
+		if val == "" {
+			source = "(not set)"
+		} else if root != "" {
+			// Check if the value came from env.json or env file.
+			jsonFile := filepath.Join(root, config.DirName, "env.json")
+			if data, err := os.ReadFile(jsonFile); err == nil {
+				var m map[string]string
+				if err := json.Unmarshal(data, &m); err == nil {
+					if _, ok := m[k]; ok {
+						source = ".proofctl/env.json"
+					}
+				}
+			}
+			if source == "environment" {
+				envFile := filepath.Join(root, config.DirName, "env")
+				if data, err := os.ReadFile(envFile); err == nil && strings.Contains(string(data), k+"=") {
+					source = ".proofctl/env"
+				}
+			}
+		}
+		entries = append(entries, envEntry{Key: k, Value: val, Source: source, Set: val != ""})
+	}
+
+	if useJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(entries)
+		return
+	}
+
+	fmt.Printf("%-30s  %-40s  %s\n", "KEY", "VALUE", "SOURCE")
+	fmt.Printf("%-30s  %-40s  %s\n", strings.Repeat("-", 30), strings.Repeat("-", 40), strings.Repeat("-", 20))
+	for _, e := range entries {
+		val := e.Value
+		if len(val) > 40 {
+			val = val[:37] + "..."
+		}
+		if val == "" {
+			val = "(not set)"
+		}
+		fmt.Printf("%-30s  %-40s  %s\n", e.Key, val, e.Source)
+	}
+
+	if root != "" {
+		jsonFile := filepath.Join(root, config.DirName, "env.json")
+		if _, err := os.Stat(jsonFile); err == nil {
+			fmt.Printf("\nAuto-load source: %s\n", jsonFile)
 		}
 	}
 }

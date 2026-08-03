@@ -70,17 +70,26 @@ func cmdReplay(args []string, useJSON bool) {
 	fs.Var(&generatorFlags, "generator", `generator command template with {cert} placeholder (repeatable)`)
 
 	checkerFlag := fs.String("checker", "", "checker command (default: value of BRIDGE_CHECKER env var)")
-	claimIDFlag := fs.String("claim", "", "claim ID to attest (required)")
+	claimIDFlag := fs.String("claim", "", "claim ID to attest (required unless --batch)")
 	certOutFlag := fs.String("cert-out", "", "where to write generated certificate (single-evidence only; default: temp file)")
 	semanticFlag := fs.Bool("semantic", false, "semantic-replay: checker pass is sufficient; skip exact digest comparison")
 	dryRunFlag := fs.Bool("dry-run", false, "validate inputs and CAS state without running the generator or writing attestations")
+	batchFlag := fs.String("batch", "", "path to batch manifest JSON for replaying multiple claims")
+	skipAcceptedFlag := fs.Bool("skip-if-accepted", false, "skip claims that already have an accepted attestation with non-empty freshness")
+	reuseGeneratedFlag := fs.String("reuse-generated", "", "directory containing already-generated cert files; skip generator step and reuse <evidence-hex>.json")
 
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
 
+	// Batch replay path.
+	if *batchFlag != "" {
+		cmdReplayBatch(*batchFlag, *skipAcceptedFlag, useJSON)
+		return
+	}
+
 	if *claimIDFlag == "" {
-		die(useJSON, errors.CodeInvalidInput, "replay: --claim is required")
+		die(useJSON, errors.CodeInvalidInput, "replay: --claim is required (or use --batch <manifest.json>)")
 	}
 
 	var pairs []replayPair
@@ -119,9 +128,26 @@ func cmdReplay(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, "replay: set --checker or BRIDGE_CHECKER")
 	}
 
-	root, _, _, _ := loadProjectGraph(useJSON)
+	root, _, _, attestations := loadProjectGraph(useJSON)
 	casRoot := filepath.Join(root, config.DirName, config.CASDir)
 	replayDate := time.Now().UTC().Format("2006-01-02")
+
+	// --skip-if-accepted: exit early if already accepted with freshness.
+	if *skipAcceptedFlag {
+		if att, ok := attestations[*claimIDFlag]; ok &&
+			att.Outcome == string(ir.StatusAccepted) &&
+			att.StartFreshness != "" && att.EndFreshness != "" {
+			if !useJSON {
+				fmt.Printf("SKIP  %s — already accepted (assurance=%s, freshness=%s)\n",
+					*claimIDFlag, att.Assurance, att.StartFreshness)
+			} else {
+				enc := json.NewEncoder(os.Stdout)
+				_ = enc.Encode(map[string]any{"skipped": true, "claim_id": *claimIDFlag,
+					"reason": "already accepted with freshness"})
+			}
+			return
+		}
+	}
 
 	if *dryRunFlag {
 		runReplayDryRun(pairs, casRoot, root, checkerCmd, *claimIDFlag, useJSON)
@@ -132,6 +158,18 @@ func cmdReplay(args []string, useJSON bool) {
 	allPass := true
 
 	for i, p := range pairs {
+		// --reuse-generated: use pre-generated cert from directory instead of running generator.
+		if *reuseGeneratedFlag != "" {
+			hexPart := strings.TrimPrefix(p.digest, "sha256:")
+			if len(hexPart) > 16 {
+				hexPart = hexPart[:16]
+			}
+			candidatePath := filepath.Join(*reuseGeneratedFlag, hexPart+".json")
+			if _, statErr := os.Stat(candidatePath); statErr == nil {
+				// Patch the generator to copy the pre-generated file.
+				p.generator = "cp " + candidatePath + " {cert}"
+			}
+		}
 		label := fmt.Sprintf("evidence[%d] %s", i, p.digest)
 
 		// Auto-import from path_hint if the digest is not yet in CAS.
@@ -655,4 +693,311 @@ func indentLines(s, prefix string) string {
 		lines[i] = prefix + l
 	}
 	return strings.Join(lines, "\n")
+}
+
+// batchReplayEntry is one record in a --batch manifest file.
+// Evidence/generator pairs are shared across all claims in the entry —
+// the generator runs once and each claim gets an attestation.
+type batchReplayEntry struct {
+	Claims    []string `json:"claims"`
+	Evidence  []string `json:"evidence"`
+	Generator []string `json:"generator"`
+	Semantic  bool     `json:"semantic"`
+	Checker   string   `json:"checker,omitempty"`
+}
+
+// cmdReplayBatch reads a JSON manifest and executes replay for each entry.
+// Within an entry, the generator runs once; all listed claims share the result.
+func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		die(useJSON, errors.CodeInvalidInput, "replay --batch: read manifest: "+err.Error())
+	}
+	var entries []batchReplayEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		die(useJSON, errors.CodeInvalidInput, "replay --batch: parse manifest: "+err.Error())
+	}
+	if len(entries) == 0 {
+		die(useJSON, errors.CodeInvalidInput, "replay --batch: manifest contains no entries")
+	}
+
+	root, _, _, attestations := loadProjectGraph(useJSON)
+	casRoot := filepath.Join(root, config.DirName, config.CASDir)
+	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
+	replayDate := time.Now().UTC().Format("2006-01-02")
+
+	if err := os.MkdirAll(attestDir, 0o755); err != nil {
+		die(useJSON, errors.CodeInternalError, "replay --batch: mkdir attestations: "+err.Error())
+	}
+
+	type batchResult struct {
+		ClaimID    string `json:"claim_id"`
+		Pass       bool   `json:"pass"`
+		Skipped    bool   `json:"skipped,omitempty"`
+		SkipReason string `json:"skip_reason,omitempty"`
+		AttestPath string `json:"attestation,omitempty"`
+		FailReason string `json:"fail_reason,omitempty"`
+	}
+	var allResults []batchResult
+	totalPass, totalFail, totalSkip := 0, 0, 0
+
+	for entryIdx, entry := range entries {
+		if len(entry.Claims) == 0 {
+			continue
+		}
+		if len(entry.Evidence) != len(entry.Generator) {
+			die(useJSON, errors.CodeInvalidInput, fmt.Sprintf(
+				"replay --batch: entry %d: %d evidence items but %d generators — counts must match",
+				entryIdx, len(entry.Evidence), len(entry.Generator)))
+		}
+
+		checkerCmd := entry.Checker
+		if checkerCmd == "" {
+			checkerCmd = os.Getenv("BRIDGE_CHECKER")
+		}
+		if checkerCmd == "" {
+			die(useJSON, errors.CodeInvalidInput, fmt.Sprintf(
+				"replay --batch: entry %d: no checker — set entry.checker or BRIDGE_CHECKER", entryIdx))
+		}
+
+		pairs := make([]replayPair, len(entry.Evidence))
+		for i := range entry.Evidence {
+			pairs[i] = replayPair{digest: entry.Evidence[i], generator: entry.Generator[i]}
+		}
+
+		// Check --skip-if-accepted for all claims in this entry.
+		allSkipped := true
+		for _, claimID := range entry.Claims {
+			if skipAccepted {
+				if att, ok := attestations[claimID]; ok &&
+					att.Outcome == string(ir.StatusAccepted) &&
+					att.StartFreshness != "" {
+					allResults = append(allResults, batchResult{
+						ClaimID: claimID, Pass: true, Skipped: true,
+						SkipReason: "already accepted with freshness",
+					})
+					totalSkip++
+					continue
+				}
+			}
+			allSkipped = false
+			break
+		}
+		if allSkipped && skipAccepted {
+			continue
+		}
+
+		// Run evidence generation once for this entry (shared across all claims).
+		if !useJSON {
+			fmt.Printf("\n[entry %d] generating %d evidence item(s) for %d claim(s)\n",
+				entryIdx, len(pairs), len(entry.Claims))
+		}
+
+		certPaths := make([]string, len(pairs))
+		entryPass := true
+		var firstFailReason string
+
+		for i, p := range pairs {
+			// Auto-import from path_hint if needed.
+			if !casHasDigest(casRoot, p.digest) {
+				imported, importErr := autoImportFromPathHint(root, casRoot, p.digest)
+				if importErr != nil && !useJSON {
+					fmt.Printf("  warning: auto-import failed for %s: %v\n", p.digest, importErr)
+				} else if imported && !useJSON {
+					fmt.Printf("  auto-imported %s\n", p.digest)
+				}
+			}
+
+			f, tmpErr := os.CreateTemp("", "proofctl-batch-replay-*.json")
+			if tmpErr != nil {
+				die(useJSON, errors.CodeInternalError, "replay --batch: create temp: "+tmpErr.Error())
+			}
+			certPath := f.Name()
+			_ = f.Close()
+			defer os.Remove(certPath) //nolint:gocritic,errcheck
+
+			certPaths[i] = certPath
+			genCmd := strings.ReplaceAll(p.generator, "{cert}", certPath)
+			genParts := strings.Fields(genCmd)
+			if !useJSON {
+				fmt.Printf("  evidence[%d]: running generator: %s\n", i, genCmd)
+			}
+			genOut, genErr := exec.Command(genParts[0], genParts[1:]...).CombinedOutput()
+			if genErr != nil {
+				reason := fmt.Sprintf("evidence[%d] generator failed: %v", i, genErr)
+				if len(genOut) > 0 {
+					reason += "\n" + indentLines(string(genOut), "    ")
+				}
+				entryPass = false
+				firstFailReason = reason
+				break
+			}
+		}
+
+		if !entryPass {
+			for _, claimID := range entry.Claims {
+				allResults = append(allResults, batchResult{
+					ClaimID: claimID, Pass: false, FailReason: firstFailReason,
+				})
+				totalFail++
+			}
+			continue
+		}
+
+		// Run checker once per evidence item — shared for all claims.
+		checkerResults := make([]replayItemResult, len(pairs))
+		allCheckerPass := true
+		for i, p := range pairs {
+			certPath := certPaths[i]
+			checkerParts := append(strings.Fields(checkerCmd), certPath)
+			if !useJSON {
+				fmt.Printf("  evidence[%d]: running checker\n", i)
+			}
+			checkerRun := exec.Command(checkerParts[0], checkerParts[1:]...)
+			checkerRun.Env = os.Environ()
+			checkerOut, _ := checkerRun.CombinedOutput()
+			checkerExit := 0
+			if checkerRun.ProcessState != nil {
+				checkerExit = checkerRun.ProcessState.ExitCode()
+			}
+			checkerPass := checkerExit == 0
+
+			// Digest comparison (unless semantic).
+			var h [32]byte
+			if certData, readErr := os.ReadFile(certPath); readErr == nil {
+				h = sha256.Sum256(certData)
+			}
+			gotDigest := fmt.Sprintf("sha256:%x", h)
+			digestMatch := gotDigest == p.digest || entry.Semantic
+
+			failReason := ""
+			if !digestMatch {
+				failReason = buildDigestMismatchReason(gotDigest, p.digest, certPath, casRoot)
+			}
+			if !checkerPass {
+				cr := fmt.Sprintf("checker exited %d", checkerExit)
+				if len(checkerOut) > 0 {
+					cr += "\n" + indentLines(string(checkerOut), "    ")
+				}
+				if failReason != "" {
+					failReason += "\n" + cr
+				} else {
+					failReason = cr
+				}
+			}
+			checkerResults[i] = replayItemResult{
+				expectedDigest:  p.digest,
+				generatedDigest: gotDigest,
+				digestMatch:     digestMatch,
+				checkerExit:     checkerExit,
+				checkerPass:     checkerPass,
+				failReason:      failReason,
+				checkerOutput:   string(checkerOut),
+			}
+			if !digestMatch || !checkerPass {
+				allCheckerPass = false
+			}
+		}
+
+		if !allCheckerPass {
+			var reasons []string
+			for i, r := range checkerResults {
+				if r.failReason != "" {
+					reasons = append(reasons, fmt.Sprintf("evidence[%d]: %s", i, r.failReason))
+				}
+			}
+			failMsg := strings.Join(reasons, "; ")
+			for _, claimID := range entry.Claims {
+				allResults = append(allResults, batchResult{
+					ClaimID: claimID, Pass: false, FailReason: failMsg,
+				})
+				totalFail++
+			}
+			continue
+		}
+
+		// All checks passed — write one attestation per claim.
+		assurance := ir.AssuranceExactReplay
+		if entry.Semantic {
+			assurance = ir.AssuranceReproducibleComputation
+		}
+		digests := entry.Evidence
+		generators := entry.Generator
+
+		for _, claimID := range entry.Claims {
+			if skipAccepted {
+				if att, ok := attestations[claimID]; ok &&
+					att.Outcome == string(ir.StatusAccepted) &&
+					att.StartFreshness != "" {
+					allResults = append(allResults, batchResult{
+						ClaimID: claimID, Pass: true, Skipped: true,
+						SkipReason: "already accepted with freshness",
+					})
+					totalSkip++
+					continue
+				}
+			}
+
+			att := ir.Attestation{
+				ClaimID:        claimID,
+				Outcome:        string(ir.StatusAccepted),
+				Assurance:      assurance,
+				StartFreshness: replayDate,
+				EndFreshness:   replayDate,
+				Metadata: map[string]string{
+					"cold_replay_date": replayDate,
+					"evidence_count":   fmt.Sprintf("%d", len(pairs)),
+					"evidence_digests": strings.Join(digests, ","),
+					"generator_cmds":   strings.Join(generators, "|"),
+					"digests_fresh":    "true",
+					"checker_exit":     "0",
+					"semantic_replay":  fmt.Sprintf("%v", entry.Semantic),
+					"batch_entry":      fmt.Sprintf("%d", entryIdx),
+				},
+			}
+			attPath := filepath.Join(attestDir, claimID+".json")
+			attData, _ := json.MarshalIndent(att, "", "  ")
+			if writeErr := os.WriteFile(attPath, append(attData, '\n'), 0o644); writeErr != nil {
+				allResults = append(allResults, batchResult{
+					ClaimID: claimID, Pass: false,
+					FailReason: "write attestation: " + writeErr.Error(),
+				})
+				totalFail++
+				continue
+			}
+			allResults = append(allResults, batchResult{
+				ClaimID: claimID, Pass: true, AttestPath: attPath,
+			})
+			totalPass++
+			if !useJSON {
+				fmt.Printf("  PASS  %s → %s\n", claimID, attPath)
+			}
+		}
+	}
+
+	if useJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(map[string]any{
+			"pass":    totalFail == 0,
+			"results": allResults,
+			"summary": map[string]int{"passed": totalPass, "failed": totalFail, "skipped": totalSkip},
+		})
+		if totalFail > 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	fmt.Printf("\n--- Batch Replay Summary ---\n")
+	fmt.Printf("%d passed, %d failed, %d skipped\n", totalPass, totalFail, totalSkip)
+	if totalFail > 0 {
+		fmt.Println("\nFailed claims:")
+		for _, r := range allResults {
+			if !r.Pass && !r.Skipped {
+				fmt.Printf("  FAIL  %s: %s\n", r.ClaimID, r.FailReason)
+			}
+		}
+		os.Exit(1)
+	}
 }

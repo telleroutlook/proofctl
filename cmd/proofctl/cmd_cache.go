@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,11 +33,17 @@ func cmdCache(args []string, useJSON bool) {
 	}
 }
 
-// cmdCacheInvalidate removes the attestation file(s) for the given claim IDs,
-// forcing a full re-run on the next proofctl check invocation.
+// cmdCacheInvalidate removes attestation files for the given claim IDs (or all
+// attestations with --all), forcing a full re-run on the next proofctl check.
 func cmdCacheInvalidate(args []string, useJSON bool) {
-	if len(args) == 0 {
-		die(useJSON, errors.CodeInvalidInput, "usage: proofctl cache invalidate <claim-id> [claim-id ...]")
+	fs := flag.NewFlagSet("cache invalidate", flag.ContinueOnError)
+	allFlag := fs.Bool("all", false, "invalidate all cached attestations")
+	if err := fs.Parse(args); err != nil {
+		die(useJSON, errors.CodeInvalidInput, err.Error())
+	}
+
+	if !*allFlag && fs.NArg() == 0 {
+		die(useJSON, errors.CodeInvalidInput, "usage: proofctl cache invalidate <claim-id> [claim-id ...] | --all")
 	}
 
 	cwd, err := os.Getwd()
@@ -57,7 +64,22 @@ func cmdCacheInvalidate(args []string, useJSON bool) {
 	}
 	var results []result
 
-	for _, claimID := range args {
+	// Collect claim IDs to invalidate.
+	claimIDs := fs.Args()
+	if *allFlag {
+		entries, readErr := os.ReadDir(attestDir)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			die(useJSON, errors.CodeInternalError, "cache invalidate: read attestation dir: "+readErr.Error())
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") &&
+				!strings.HasSuffix(e.Name(), "-replay-partial.json") {
+				claimIDs = append(claimIDs, strings.TrimSuffix(e.Name(), ".json"))
+			}
+		}
+	}
+
+	for _, claimID := range claimIDs {
 		attPath := filepath.Join(attestDir, claimID+".json")
 		if err := os.Remove(attPath); err != nil {
 			if os.IsNotExist(err) {
@@ -73,17 +95,22 @@ func cmdCacheInvalidate(args []string, useJSON bool) {
 	if useJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(results)
+		_ = enc.Encode(map[string]any{"invalidated": len(results), "results": results})
 		return
 	}
+	removed := 0
 	for _, r := range results {
 		if !r.Done {
 			fmt.Fprintf(os.Stderr, "FAIL  %s — %s\n", r.ClaimID, r.Note)
 		} else if r.Note != "" {
 			fmt.Printf("OK    %s (%s)\n", r.ClaimID, r.Note)
 		} else {
-			fmt.Printf("OK    %s — attestation removed; next check will re-run\n", r.ClaimID)
+			fmt.Printf("OK    %s — attestation removed\n", r.ClaimID)
+			removed++
 		}
+	}
+	if *allFlag {
+		fmt.Printf("\n%d attestation(s) invalidated — next 'proofctl check' will re-run all\n", removed)
 	}
 }
 

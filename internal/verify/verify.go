@@ -93,6 +93,19 @@ func (p *Pipeline) Run(
 	// 4. Check attestation cache.
 	if !p.NoCache {
 		if hit, err := p.loadCachedAttestation(claimID, cacheKey); err == nil && hit != nil {
+			// Backfill freshness if the cached attestation pre-dates the B11/B14 fix.
+			if hit.StartFreshness == "" || hit.EndFreshness == "" {
+				today := time.Now().UTC().Format("2006-01-02")
+				hit.StartFreshness = today
+				hit.EndFreshness = today
+				// Recompute self-digest after backfill.
+				hit.SelfDigest = ""
+				if sd, sdErr := ir.DigestOf(hit); sdErr == nil {
+					hit.SelfDigest = sd
+				}
+				// Best-effort write — if it fails the in-memory attestation still works.
+				_ = writeAttestationAtomic(p.AttestDir, claimID, hit)
+			}
 			return &Result{Attestation: hit, CacheHit: true, CacheKey: cacheKey}, nil
 		} else if err != nil && isSigInvalidError(err) {
 			// Signature verification failed on the cached attestation — surface the error

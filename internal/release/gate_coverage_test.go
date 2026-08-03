@@ -234,10 +234,23 @@ func TestC01_MissingAttestation(t *testing.T) {
 	}
 }
 
+// coverBuildGraphWithChecker builds a minimal DAG where every claim has a
+// checker_policy set, so C04 freshness checks apply.
+func coverBuildGraphWithChecker(t *testing.T, ids ...string) *dag.DAG {
+	t.Helper()
+	d := dag.New()
+	for _, id := range ids {
+		if err := d.AddClaim(&ir.Claim{ID: id, Kind: "lemma", CheckerPolicy: "test-checker"}); err != nil {
+			t.Fatalf("AddClaim(%q): %v", id, err)
+		}
+	}
+	return d
+}
+
 // TestC04_MissingAttestation verifies that C04 fails when a claim has no attestation.
 func TestC04_MissingAttestation(t *testing.T) {
 	t.Parallel()
-	g := coverBuildGraph(t, "c1")
+	g := coverBuildGraphWithChecker(t, "c1")
 	results := release.EvaluateConditions(g, map[string]*ir.Attestation{}, policy.ReleasePolicy{})
 	c04 := results[3]
 	if c04.ID != release.CondReplayConsistency {
@@ -251,7 +264,7 @@ func TestC04_MissingAttestation(t *testing.T) {
 // TestC04_PartialFreshness verifies that C04 fails when freshness fields are partially empty.
 func TestC04_PartialFreshness(t *testing.T) {
 	t.Parallel()
-	g := coverBuildGraph(t, "c1")
+	g := coverBuildGraphWithChecker(t, "c1")
 	atts := map[string]*ir.Attestation{
 		"c1": {
 			ClaimID:        "c1",

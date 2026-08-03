@@ -18,7 +18,7 @@ import (
 
 func cmdCas(args []string, useJSON bool) {
 	if len(args) == 0 {
-		die(useJSON, errors.CodeInvalidInput, "usage: proofctl cas <import|import-dir|list> ...")
+		die(useJSON, errors.CodeInvalidInput, "usage: proofctl cas <import|import-dir|list|gc> ...")
 	}
 	switch args[0] {
 	case "import":
@@ -27,8 +27,10 @@ func cmdCas(args []string, useJSON bool) {
 		cmdCasImportDir(args[1:], useJSON)
 	case "list":
 		cmdCasList(args[1:], useJSON)
+	case "gc":
+		cmdCasGC(args[1:], useJSON)
 	default:
-		die(useJSON, errors.CodeInvalidInput, "unknown cas subcommand "+args[0]+"; use import, import-dir, or list")
+		die(useJSON, errors.CodeInvalidInput, "unknown cas subcommand "+args[0]+"; use import, import-dir, list, or gc")
 	}
 }
 
@@ -350,5 +352,139 @@ func cmdCasImportDir(args []string, useJSON bool) {
 	fmt.Printf("\n%d files imported, %d failed\n", imported, len(results)-imported)
 	if graphModified {
 		fmt.Printf("Updated evidence sizes in %s\n", srcPath)
+	}
+}
+
+// cmdCasGC scans all attestations and graph.json to collect referenced digests,
+// then deletes unreferenced blobs from the CAS and reports freed bytes.
+func cmdCasGC(args []string, useJSON bool) {
+	fs := flag.NewFlagSet("cas gc", flag.ContinueOnError)
+	dryRunFlag := fs.Bool("dry-run", false, "report what would be deleted without deleting")
+	if err := fs.Parse(args); err != nil {
+		die(useJSON, errors.CodeInvalidInput, err.Error())
+	}
+
+	root, cfg, _, attestations := loadProjectGraph(useJSON)
+	casRoot := filepath.Join(root, config.DirName, config.CASDir)
+
+	// Collect all referenced digests from graph.json evidence list.
+	referenced := make(map[string]struct{})
+	srcPath := filepath.Join(root, cfg.GraphSource)
+	if srcData, err := os.ReadFile(srcPath); err == nil {
+		if pg, err := compile.Compile(srcData, compile.FormatJSON); err == nil {
+			for _, ev := range pg.Evidence {
+				hex := strings.TrimPrefix(ev.Digest, "sha256:")
+				referenced[hex] = struct{}{}
+			}
+		}
+	}
+
+	// Collect digests referenced by attestations.
+	for _, att := range attestations {
+		for _, ev := range att.Evidence {
+			hex := strings.TrimPrefix(ev.Digest, "sha256:")
+			referenced[hex] = struct{}{}
+		}
+	}
+
+	// Walk CAS blobs and collect candidates for deletion.
+	type gcEntry struct {
+		Digest  string `json:"digest"`
+		Size    int64  `json:"size"`
+		Deleted bool   `json:"deleted"`
+		Error   string `json:"error,omitempty"`
+	}
+	var candidates []gcEntry
+	sha256Dir := filepath.Join(casRoot, "sha256")
+	prefixes, err := os.ReadDir(sha256Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if !useJSON {
+				fmt.Println("CAS is empty — nothing to collect")
+			} else {
+				enc := json.NewEncoder(os.Stdout)
+				_ = enc.Encode(map[string]any{"freed_bytes": 0, "deleted": 0, "dry_run": *dryRunFlag})
+			}
+			return
+		}
+		die(useJSON, errors.CodeInternalError, "cas gc: read CAS: "+err.Error())
+	}
+
+	for _, prefix := range prefixes {
+		if !prefix.IsDir() {
+			continue
+		}
+		suffixDir := filepath.Join(sha256Dir, prefix.Name())
+		entries, readErr := os.ReadDir(suffixDir)
+		if readErr != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			hexFull := prefix.Name() + entry.Name()
+			if _, ok := referenced[hexFull]; ok {
+				continue // still referenced
+			}
+			info, statErr := entry.Info()
+			if statErr != nil {
+				continue
+			}
+			candidates = append(candidates, gcEntry{
+				Digest: "sha256:" + hexFull,
+				Size:   info.Size(),
+			})
+		}
+	}
+
+	var freedBytes int64
+	for i := range candidates {
+		blobPath := filepath.Join(sha256Dir, candidates[i].Digest[7:9], candidates[i].Digest[9:])
+		if *dryRunFlag {
+			candidates[i].Deleted = false
+		} else {
+			if removeErr := os.Remove(blobPath); removeErr != nil && !os.IsNotExist(removeErr) {
+				candidates[i].Error = removeErr.Error()
+			} else {
+				candidates[i].Deleted = true
+				freedBytes += candidates[i].Size
+			}
+		}
+		if *dryRunFlag {
+			freedBytes += candidates[i].Size
+		}
+	}
+
+	if useJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(map[string]any{
+			"dry_run":     *dryRunFlag,
+			"freed_bytes": freedBytes,
+			"deleted":     len(candidates),
+			"blobs":       candidates,
+		})
+		return
+	}
+
+	if len(candidates) == 0 {
+		fmt.Println("cas gc: no unreferenced blobs found")
+		return
+	}
+	verb := "deleted"
+	if *dryRunFlag {
+		verb = "would delete"
+	}
+	for _, c := range candidates {
+		if c.Error != "" {
+			fmt.Printf("FAIL  %s — %s\n", c.Digest, c.Error)
+		} else {
+			fmt.Printf("%s  %s  (%d bytes)\n", verb, c.Digest, c.Size)
+		}
+	}
+	fmt.Printf("\n%s %d blob(s), freed %d bytes\n", verb, len(candidates), freedBytes)
+	if *dryRunFlag {
+		fmt.Println("Run without --dry-run to actually delete")
 	}
 }
