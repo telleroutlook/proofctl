@@ -19,6 +19,7 @@
 //	release   Run the release gate
 //	status    Print the current proof graph status
 //	snapshot  Write a point-in-time snapshot of claims + statuses
+//	doctor    Check that the proofctl environment is ready
 package main
 
 import (
@@ -37,10 +38,19 @@ import (
 	"github.com/telleroutlook/proofctl/internal/policy"
 )
 
+// version is set at build time via -ldflags "-X main.version=vX.Y.Z".
+var version = "dev"
+
 func main() {
 	jsonFlag := flag.Bool("json", false, "output in JSON format")
+	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Usage = usage
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Println("proofctl", version)
+		return
+	}
 
 	args := flag.Args()
 	if len(args) == 0 {
@@ -86,6 +96,8 @@ func main() {
 		cmdStatus(subargs, *jsonFlag)
 	case "snapshot":
 		cmdSnapshot(subargs, *jsonFlag)
+	case "doctor":
+		cmdDoctor(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -116,10 +128,12 @@ Subcommands:
   replay    Cold-start generator+checker replay for a claim
   release   Run the release gate
   snapshot  Write a point-in-time snapshot of claims + statuses
+  doctor    Check that the proofctl environment is ready (PATH, project, checker, CAS)
   status    Print the current proof graph status
 
 Flags:
-  --json    Output in JSON format`)
+  --json      Output in JSON format
+  --version   Print version and exit`)
 }
 
 // die prints an error and exits with code 1.

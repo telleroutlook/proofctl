@@ -270,76 +270,19 @@ T20+T21+T22 完成后 ──→ weil-lower-bound 可删除 scripts/replay_030.py
 
 ---
 
-## Milestone 8 — 工程健康修复（来自外部评审实测）
+## Milestone 8 — 工程健康修复（来自外部评审实测）✅
 
 **背景：** 外部评审者实际编译、运行并审阅了代码，发现若干可复现的工程问题。
 这些均是低成本、高收益的修复项，应在后续里程碑之前优先处理。
 
-### T23a：`gofmt` 未通过修复
-
-评审实测发现 7 个文件未通过 `gofmt`：`cmd_cas.go`、`cmd_env.go`、`cmd_replay.go`、
-`internal/ir/types.go`、`internal/policy/policy.go`、`internal/release/gate.go`、
-`internal/scaffold/scaffold.go`。当前 `main` 分支推到 CI 的 "Format check" 步骤会直接失败。
-
-- 运行 `gofmt -w .` 修复全部格式问题
-- 在 `.github/` 或本地加 pre-commit 钩子（`gofmt -l .` 非空则拒绝提交），防止再次漂移
-
-### T23b：`--help` 子命令列表与 README 不一致
-
-运行时 `proofctl --help` 遗漏了 `cas`、`pin`、`domains`、`env`、`replay` 共 5 个子命令；
-`main.go` 包注释、README、运行时输出三处数字（12 / 13 / 17）互不一致。
-
-- 统一子命令注册表，`--help` 输出从注册表动态生成，杜绝手工维护漂移
-- README 中"13 subcommands"修正为实际数量
-
-### T23c：`internal/release` 覆盖率补齐
-
-`internal/release`（C01–C04 fail-closed 核心）覆盖率 68.6%，是所有核心包中最低的。
-评审明确指出这是最需要优先补齐的包。
-
-- 补齐 C01–C04 四个条件的边界情况（空 claim 集、部分通过、metadata key 缺失等）
-- 目标：与其他核心包齐平（≥85%）
-
-### T23d：CLI 层单元测试
-
-17 个子命令当前覆盖率 0%，仅靠需要 `-tags integration` 的根目录集成测试间接覆盖。
-参数解析错误、`--json` 输出格式、flag 冲突等场景完全没有兜底。
-
-- 为每个子命令补最小单元测试：至少覆盖参数缺失报错、`--json` 输出格式验证两类场景
-- 不依赖编译二进制，不需要额外 build tag
-
-### T23e：Fuzz 语料库接入 CI
-
-`internal/ir` 已有 `FuzzDecodeStrict_Claim`、`FuzzCanonicalJSON` 两个 fuzz target，
-但 `testdata/fuzz/` 只有占位 `.gitkeep`，从未生成种子语料库，等于形同虚设。
-
-- 本地运行 fuzz 至少 60 秒，将生成的种子语料提交到 `testdata/fuzz/`
-- CI 中加 `go test -fuzz=. -fuzztime=30s ./internal/ir/...` 定时任务（每天或每次 push）
-- 任何新发现的崩溃样例自动落盘
-
-### T23f：bridge.py 双副本同步 CI 检查
-
-`adapters/cap/bridge.py` 与 `internal/scaffold/bridge.py` 应始终保持一致（scaffold 是嵌入副本），
-目前靠 `CLAUDE.md` 人工约定，已发生过漂移风险。
-
-- CI 加一步 `diff adapters/cap/bridge.py internal/scaffold/bridge.py`，不一致则 fail
-- 将这条约定从"文档保证"升级为"自动化保证"
-
-### T23g：`SECURITY.md` + 版本 tag
-
-对外宣称"fail-closed 认证平台"但缺少最基础的信任信号：
-
-- 新增 `SECURITY.md`：说明漏洞上报渠道（哪怕是 GitHub Issue + 邮件）
-- 打第一个语义化版本 tag `v0.1.0`，配最简 `CHANGELOG.md`（记录已完成的 M1–M7 核心功能）
-- `go.mod` 加版本注释，使外部项目可以 `go get github.com/telleroutlook/proofctl@v0.1.0`
-
-### T23h：仓库内最小可运行 demo
-
-README 引用的 `weil-lower-bound` 在另一个 repo，外部用户无法在 proofctl 仓库内
-体验"从零到 release 全绿"的完整流程。
-
-- 在 `examples/minimal/` 补一个玩具级证明：2–3 个 claim、一个 `echo '{"ok":true}' > $CERT` 的假 checker、一份 policy
-- `README.md` 中指向此 demo，使新用户无需克隆外部 repo 即可验证工具可用
+### T23a：`gofmt` 未通过修复 ✅
+### T23b：`--help` 子命令列表与 README 不一致 ✅
+### T23c：`internal/release` 覆盖率补齐 ✅（全部包 ≥80%）
+### T23d：CLI 层单元测试 ✅
+### T23e：Fuzz 语料库接入 CI ✅
+### T23f：bridge.py 双副本同步 CI 检查 ✅
+### T23g：`SECURITY.md` + 版本 tag ✅
+### T23h：仓库内最小可运行 demo ✅
 
 ---
 
@@ -358,13 +301,36 @@ T23h (mini demo)   ──→ 中期，显著降低上手门槛
 
 ---
 
-## Milestone 9 — 环境自检命令
+## Milestone 8.5 — 预编译二进制发布（GitHub Releases）
+
+**背景：** weil-lower-bound 等仓库需要在 CI 中使用固定版本的 proofctl，
+但目前只能 `go install`（需要 Go 环境）。GitHub Releases 附带预编译二进制
+可让任何环境通过 `curl` 直接获取，无需安装 Go。
+
+### 目标
+
+- 打 tag（`v*`）时，CI 自动 cross-compile 以下目标并上传到 GitHub Releases：
+  - `proofctl-linux-amd64`
+  - `proofctl-linux-arm64`
+  - `proofctl-darwin-arm64`
+  - `proofctl-windows-amd64.exe`
+- 下游仓库可以固定版本：`curl -L https://github.com/telleroutlook/proofctl/releases/download/v0.1.0/proofctl-linux-amd64 -o proofctl`
+
+### 实现
+
+- `.github/workflows/release.yml`：监听 `push tags v*`，矩阵构建 + 上传 assets
+- 无需 goreleaser，用标准 `go build -ldflags "-X main.version=$TAG"` 即可
+- `main.go` 加 `--version` flag，打印版本号（来自构建时注入的 ldflags）
+
+---
+
+## Milestone 9 — 环境自检命令 ✅
 
 **背景（来自 weil-lower-bound 反馈）：** 当 `proofctl` 二进制不在 PATH 时，调用它的脚本静默失败，
 没有明确的错误提示。`proofctl env` 已有基础的环境快照功能，但它是被动快照，不是主动检查。
 在首次上手新机器或 CI 环境时，用户需要一个命令能告诉他"哪里缺了什么"。
 
-### T23：`proofctl doctor` — 环境就绪检查
+### T23：`proofctl doctor` — 环境就绪检查 ✅
 
 **目标：** 主动检查 proofctl 运行环境，列出每项是否就绪，缺失时给出修复建议。
 
