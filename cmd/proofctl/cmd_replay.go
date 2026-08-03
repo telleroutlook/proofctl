@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/telleroutlook/proofctl/internal/cas"
 	"github.com/telleroutlook/proofctl/internal/config"
 	errors "github.com/telleroutlook/proofctl/internal/errors"
 	"github.com/telleroutlook/proofctl/internal/ir"
@@ -22,6 +23,23 @@ type multiFlag []string
 
 func (f *multiFlag) String() string     { return strings.Join(*f, ", ") }
 func (f *multiFlag) Set(v string) error { *f = append(*f, v); return nil }
+
+// replayPair is one evidence/generator pair.
+type replayPair struct {
+	digest    string
+	generator string
+}
+
+// replayItemResult captures the per-evidence outcome.
+type replayItemResult struct {
+	expectedDigest  string
+	generatedDigest string
+	digestMatch     bool
+	checkerExit     int
+	checkerPass     bool
+	failReason      string // detailed, set on failure
+	checkerOutput   string // combined checker output on failure
+}
 
 // cmdReplay implements the replay subcommand.
 //
@@ -38,10 +56,11 @@ func (f *multiFlag) Set(v string) error { *f = append(*f, v); return nil }
 // Steps per evidence item:
 //  1. Run generator (substituting {cert} with a temp path)
 //  2. Compute SHA-256 of generated certificate
-//  3. Compare against the expected digest
+//  3. Compare against the expected digest (skipped with --semantic)
 //  4. Run checker (via BRIDGE_CHECKER or --checker)
 //
-// A single exact-replay attestation is written only when ALL items pass.
+// A single attestation is written only when ALL items pass.
+// When some items fail, a partial-result debug file is written for incremental debugging.
 func cmdReplay(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
 
@@ -53,6 +72,8 @@ func cmdReplay(args []string, useJSON bool) {
 	checkerFlag := fs.String("checker", "", "checker command (default: value of BRIDGE_CHECKER env var)")
 	claimIDFlag := fs.String("claim", "", "claim ID to attest (required)")
 	certOutFlag := fs.String("cert-out", "", "where to write generated certificate (single-evidence only; default: temp file)")
+	semanticFlag := fs.Bool("semantic", false, "semantic-replay: checker pass is sufficient; skip exact digest comparison")
+	dryRunFlag := fs.Bool("dry-run", false, "validate inputs and CAS state without running the generator or writing attestations")
 
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
@@ -62,14 +83,7 @@ func cmdReplay(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, "replay: --claim is required")
 	}
 
-	// Build evidence/generator pairs. Two supported calling conventions:
-	//   (a) --evidence d1 --generator g1 --evidence d2 --generator g2  (multi)
-	//   (b) --generator g1 <digest-positional-arg>                      (legacy single)
-	type pair struct {
-		digest    string
-		generator string
-	}
-	var pairs []pair
+	var pairs []replayPair
 
 	switch {
 	case len(evidenceFlags) > 0 && len(generatorFlags) > 0:
@@ -79,14 +93,22 @@ func cmdReplay(args []string, useJSON bool) {
 				len(evidenceFlags), len(generatorFlags)))
 		}
 		for i := range evidenceFlags {
-			pairs = append(pairs, pair{digest: evidenceFlags[i], generator: generatorFlags[i]})
+			pairs = append(pairs, replayPair{digest: evidenceFlags[i], generator: generatorFlags[i]})
 		}
 	case len(generatorFlags) == 1 && fs.NArg() >= 1:
 		// Legacy: single --generator + positional digest.
-		pairs = append(pairs, pair{digest: fs.Arg(0), generator: generatorFlags[0]})
+		pairs = append(pairs, replayPair{digest: fs.Arg(0), generator: generatorFlags[0]})
 	default:
 		die(useJSON, errors.CodeInvalidInput,
 			"replay: use --evidence <digest> --generator <cmd> (repeatable) or legacy --generator <cmd> <digest>")
+	}
+
+	// Validate every generator template contains {cert}.
+	for i, p := range pairs {
+		if !strings.Contains(p.generator, "{cert}") {
+			die(useJSON, errors.CodeInvalidInput,
+				fmt.Sprintf("replay: evidence[%d] generator %q is missing {cert} placeholder", i, p.generator))
+		}
 	}
 
 	checkerCmd := *checkerFlag
@@ -98,21 +120,29 @@ func cmdReplay(args []string, useJSON bool) {
 	}
 
 	root, _, _, _ := loadProjectGraph(useJSON)
+	casRoot := filepath.Join(root, config.DirName, config.CASDir)
 	replayDate := time.Now().UTC().Format("2006-01-02")
 
-	type itemResult struct {
-		expectedDigest  string
-		generatedDigest string
-		digestMatch     bool
-		checkerExit     int
-		checkerPass     bool
+	if *dryRunFlag {
+		runReplayDryRun(pairs, casRoot, root, checkerCmd, *claimIDFlag, useJSON)
+		return
 	}
 
-	results := make([]itemResult, len(pairs))
+	results := make([]replayItemResult, len(pairs))
 	allPass := true
 
 	for i, p := range pairs {
 		label := fmt.Sprintf("evidence[%d] %s", i, p.digest)
+
+		// Auto-import from path_hint if the digest is not yet in CAS.
+		if !casHasDigest(casRoot, p.digest) {
+			imported, importErr := autoImportFromPathHint(root, casRoot, p.digest)
+			if importErr != nil && !useJSON {
+				fmt.Printf("  warning: auto-import failed for %s: %v\n", p.digest, importErr)
+			} else if imported && !useJSON {
+				fmt.Printf("  auto-imported %s from path_hint\n", p.digest)
+			}
+		}
 
 		// Resolve certificate output path.
 		certPath := ""
@@ -140,10 +170,14 @@ func cmdReplay(args []string, useJSON bool) {
 		}
 		genOut, genErr := exec.Command(genParts[0], genParts[1:]...).CombinedOutput()
 		if genErr != nil {
-			if !useJSON {
-				fmt.Printf("  FAIL: generator: %v\n%s\n", genErr, genOut)
+			reason := fmt.Sprintf("generator failed: %v", genErr)
+			if len(genOut) > 0 {
+				reason += "\n  generator output:\n" + indentLines(string(genOut), "    ")
 			}
-			results[i] = itemResult{expectedDigest: p.digest, checkerExit: -1}
+			if !useJSON {
+				fmt.Printf("  FAIL: %s\n", reason)
+			}
+			results[i] = replayItemResult{expectedDigest: p.digest, checkerExit: -1, failReason: reason}
 			allPass = false
 			continue
 		}
@@ -160,32 +194,47 @@ func cmdReplay(args []string, useJSON bool) {
 		}
 		f.Close()
 		gotDigest := fmt.Sprintf("sha256:%x", h.Sum(nil))
-		digestMatch := gotDigest == p.digest
+		digestMatch := gotDigest == p.digest || *semanticFlag
 
 		// Step 3: run checker.
-		checkerParts := strings.Fields(checkerCmd)
-		checkerParts = append(checkerParts, certPath)
+		checkerParts := append(strings.Fields(checkerCmd), certPath)
 		if !useJSON {
 			fmt.Printf("  running checker: %s\n", strings.Join(checkerParts, " "))
 		}
 		checkerRun := exec.Command(checkerParts[0], checkerParts[1:]...)
 		checkerRun.Env = os.Environ()
+		checkerOut, _ := checkerRun.CombinedOutput()
 		checkerExit := 0
-		if runErr := checkerRun.Run(); runErr != nil {
-			if exitErr, ok := runErr.(*exec.ExitError); ok {
-				checkerExit = exitErr.ExitCode()
-			} else {
-				checkerExit = 1
-			}
+		if checkerRun.ProcessState != nil {
+			checkerExit = checkerRun.ProcessState.ExitCode()
 		}
 		checkerPass := checkerExit == 0
 
-		results[i] = itemResult{
+		// Build failure reason with all available detail.
+		failReason := ""
+		if !digestMatch {
+			failReason = buildDigestMismatchReason(gotDigest, p.digest, certPath, casRoot)
+		}
+		if !checkerPass {
+			checkerReason := fmt.Sprintf("checker exited %d", checkerExit)
+			if len(checkerOut) > 0 {
+				checkerReason += "\n  checker output:\n" + indentLines(string(checkerOut), "    ")
+			}
+			if failReason != "" {
+				failReason += "\n" + checkerReason
+			} else {
+				failReason = checkerReason
+			}
+		}
+
+		results[i] = replayItemResult{
 			expectedDigest:  p.digest,
 			generatedDigest: gotDigest,
 			digestMatch:     digestMatch,
 			checkerExit:     checkerExit,
 			checkerPass:     checkerPass,
+			failReason:      failReason,
+			checkerOutput:   string(checkerOut),
 		}
 
 		if !digestMatch || !checkerPass {
@@ -196,10 +245,14 @@ func cmdReplay(args []string, useJSON bool) {
 				fmt.Printf("  PASS\n")
 			} else {
 				if !digestMatch {
-					fmt.Printf("  FAIL: digest mismatch: got %s, want %s\n", gotDigest, p.digest)
+					fmt.Printf("  FAIL: %s\n", buildDigestMismatchReason(gotDigest, p.digest, certPath, casRoot))
 				}
 				if !checkerPass {
-					fmt.Printf("  FAIL: checker exit %d\n", checkerExit)
+					fmt.Printf("  FAIL: checker exit %d", checkerExit)
+					if len(checkerOut) > 0 {
+						fmt.Printf("\n  checker output:\n%s", indentLines(string(checkerOut), "    "))
+					}
+					fmt.Println()
 				}
 			}
 		}
@@ -214,10 +267,14 @@ func cmdReplay(args []string, useJSON bool) {
 			digests[i] = p.digest
 			generators[i] = p.generator
 		}
+		assurance := ir.AssuranceExactReplay
+		if *semanticFlag {
+			assurance = ir.AssuranceReproducibleComputation
+		}
 		att := ir.Attestation{
 			ClaimID:        *claimIDFlag,
 			Outcome:        string(ir.StatusAccepted),
-			Assurance:      ir.AssuranceExactReplay,
+			Assurance:      assurance,
 			StartFreshness: replayDate,
 			EndFreshness:   replayDate,
 			Metadata: map[string]string{
@@ -227,6 +284,7 @@ func cmdReplay(args []string, useJSON bool) {
 				"generator_cmds":   strings.Join(generators, "|"),
 				"digests_fresh":    "true",
 				"checker_exit":     "0",
+				"semantic_replay":  fmt.Sprintf("%v", *semanticFlag),
 			},
 		}
 		attestDir := filepath.Join(root, config.DirName, config.AttestDir)
@@ -238,6 +296,9 @@ func cmdReplay(args []string, useJSON bool) {
 		if err := os.WriteFile(attestPath, append(data, '\n'), 0o644); err != nil {
 			die(useJSON, errors.CodeInternalError, "replay: write attestation: "+err.Error())
 		}
+	} else {
+		// Write partial debug record so the caller can see which items passed.
+		writePartialReplayRecord(*claimIDFlag, replayDate, results, root, useJSON)
 	}
 
 	if useJSON {
@@ -247,6 +308,8 @@ func cmdReplay(args []string, useJSON bool) {
 			DigestMatch     bool   `json:"digest_match"`
 			CheckerExit     int    `json:"checker_exit"`
 			Pass            bool   `json:"pass"`
+			FailReason      string `json:"fail_reason,omitempty"`
+			CheckerOutput   string `json:"checker_output,omitempty"`
 		}
 		items := make([]itemJSON, len(results))
 		for i, res := range results {
@@ -256,12 +319,15 @@ func cmdReplay(args []string, useJSON bool) {
 				DigestMatch:     res.digestMatch,
 				CheckerExit:     res.checkerExit,
 				Pass:            res.digestMatch && res.checkerPass,
+				FailReason:      res.failReason,
+				CheckerOutput:   res.checkerOutput,
 			}
 		}
 		out := map[string]any{
 			"pass":             allPass,
 			"claim_id":         *claimIDFlag,
 			"cold_replay_date": replayDate,
+			"semantic":         *semanticFlag,
 			"evidence":         items,
 			"attestation":      attestPath,
 		}
@@ -272,12 +338,321 @@ func cmdReplay(args []string, useJSON bool) {
 		fmt.Printf("\n--- Replay Report ---\n")
 		fmt.Printf("claim:    %s\n", *claimIDFlag)
 		fmt.Printf("date:     %s\n", replayDate)
+		fmt.Printf("mode:     %s\n", replayModeLabel(*semanticFlag))
 		fmt.Printf("evidence: %d item(s)\n", len(pairs))
 		if allPass {
 			fmt.Printf("\nREPLAY PASS — attestation written to %s\n", attestPath)
 		} else {
 			fmt.Println("\nREPLAY FAIL")
+			for i, res := range results {
+				if !res.digestMatch || !res.checkerPass {
+					fmt.Printf("  evidence[%d] %s\n", i, res.expectedDigest)
+					if res.failReason != "" {
+						fmt.Printf("    reason: %s\n",
+							strings.ReplaceAll(res.failReason, "\n", "\n    "))
+					}
+				}
+			}
 			os.Exit(1)
 		}
 	}
+}
+
+// runReplayDryRun validates CAS state and generator syntax without executing anything.
+func runReplayDryRun(pairs []replayPair, casRoot, root, checkerCmd, claimID string, useJSON bool) {
+	type dryItem struct {
+		Digest      string `json:"digest"`
+		InCAS       bool   `json:"in_cas"`
+		PathHint    string `json:"path_hint,omitempty"`
+		HasCertPlaceholder bool `json:"has_cert_placeholder"`
+	}
+
+	pg := loadCompiledGraph(root)
+	var items []dryItem
+	allOK := true
+
+	for _, p := range pairs {
+		inCAS := casHasDigest(casRoot, p.digest)
+		hasCert := strings.Contains(p.generator, "{cert}")
+		hint := ""
+		if pg != nil {
+			for _, ev := range pg.Evidence {
+				if ev.Digest == p.digest && ev.PathHint != "" {
+					hint = ev.PathHint
+					break
+				}
+			}
+		}
+		items = append(items, dryItem{
+			Digest:             p.digest,
+			InCAS:              inCAS,
+			PathHint:           hint,
+			HasCertPlaceholder: hasCert,
+		})
+		if !inCAS || !hasCert {
+			allOK = false
+		}
+	}
+
+	checkerParts := strings.Fields(checkerCmd)
+	checkerResolvable := false
+	if len(checkerParts) > 0 {
+		if _, err := exec.LookPath(checkerParts[0]); err == nil {
+			checkerResolvable = true
+		} else if _, statErr := os.Stat(checkerParts[0]); statErr == nil {
+			checkerResolvable = true
+		}
+	}
+	if !checkerResolvable {
+		allOK = false
+	}
+
+	if useJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(map[string]any{
+			"dry_run":            true,
+			"claim_id":           claimID,
+			"ok":                 allOK,
+			"checker_resolvable": checkerResolvable,
+			"checker_cmd":        checkerCmd,
+			"evidence":           items,
+		})
+		return
+	}
+
+	fmt.Printf("--- Dry Run: %s ---\n", claimID)
+	fmt.Printf("checker: %s", checkerCmd)
+	if checkerResolvable {
+		fmt.Println(" [ok]")
+	} else {
+		fmt.Printf(" [NOT FOUND in PATH or filesystem]\n")
+	}
+	for i, it := range items {
+		casStatus := "in CAS [ok]"
+		if !it.InCAS {
+			if it.PathHint != "" {
+				casStatus = fmt.Sprintf("NOT in CAS — can auto-import from %s", it.PathHint)
+			} else {
+				casStatus = "NOT in CAS, no path_hint known — run 'proofctl cas import <file>'"
+			}
+		}
+		certStatus := "has {cert} placeholder [ok]"
+		if !it.HasCertPlaceholder {
+			certStatus = "MISSING {cert} placeholder — generator cannot write output"
+		}
+		fmt.Printf("  evidence[%d] %s\n    CAS:       %s\n    generator: %s\n", i, it.Digest, casStatus, certStatus)
+	}
+	if allOK {
+		fmt.Println("\nDRY RUN OK — ready to replay")
+	} else {
+		fmt.Println("\nDRY RUN FAIL — fix the issues above before replaying")
+		os.Exit(1)
+	}
+}
+
+// casHasDigest reports whether the given sha256 digest is present in the CAS.
+func casHasDigest(casRoot, digest string) bool {
+	hexPart := strings.TrimPrefix(digest, "sha256:")
+	if len(hexPart) < 4 {
+		return false
+	}
+	blobPath := filepath.Join(casRoot, "sha256", hexPart[:2], hexPart[2:])
+	_, err := os.Stat(blobPath)
+	return err == nil
+}
+
+// autoImportFromPathHint looks up the digest in the compiled graph's evidence list,
+// finds a path_hint, and imports the file into the CAS. Returns true if imported.
+func autoImportFromPathHint(root, casRoot, digest string) (bool, error) {
+	pg := loadCompiledGraph(root)
+	if pg == nil {
+		return false, nil
+	}
+	for _, ev := range pg.Evidence {
+		if ev.Digest != digest || ev.PathHint == "" {
+			continue
+		}
+		f, err := os.Open(ev.PathHint)
+		if err != nil {
+			return false, fmt.Errorf("open path_hint %s: %w", ev.PathHint, err)
+		}
+		defer f.Close()
+		store, err := cas.New(casRoot)
+		if err != nil {
+			return false, fmt.Errorf("open CAS: %w", err)
+		}
+		gotDigest, _, err := store.Store(f)
+		if err != nil {
+			return false, fmt.Errorf("CAS store: %w", err)
+		}
+		if gotDigest != digest {
+			return false, fmt.Errorf("digest mismatch after import: file %s has %s, expected %s",
+				ev.PathHint, gotDigest, digest)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// buildDigestMismatchReason constructs a detailed mismatch message.
+// When both the old cert (from CAS) and new cert contain sha256_inputs, it diffs them.
+func buildDigestMismatchReason(gotDigest, wantDigest, newCertPath, casRoot string) string {
+	msg := fmt.Sprintf("digest mismatch: got %s, want %s", gotDigest, wantDigest)
+
+	newInputs := extractSHA256Inputs(newCertPath)
+	oldInputs := extractSHA256InputsFromCAS(casRoot, wantDigest)
+
+	if len(newInputs) == 0 && len(oldInputs) == 0 {
+		return msg
+	}
+
+	if len(oldInputs) == 0 {
+		msg += "\n  new cert has sha256_inputs but old cert not in CAS — cannot diff"
+		return msg
+	}
+
+	allKeys := make(map[string]bool)
+	for k := range oldInputs {
+		allKeys[k] = true
+	}
+	for k := range newInputs {
+		allKeys[k] = true
+	}
+	changed := false
+	diff := ""
+	for k := range allKeys {
+		oldV, inOld := oldInputs[k]
+		newV, inNew := newInputs[k]
+		switch {
+		case !inOld:
+			diff += fmt.Sprintf("\n    + %s: %s (added)", k, newV)
+			changed = true
+		case !inNew:
+			diff += fmt.Sprintf("\n    - %s: %s (removed)", k, oldV)
+			changed = true
+		case oldV != newV:
+			diff += fmt.Sprintf("\n    ~ %s\n        old: %s\n        new: %s", k, oldV, newV)
+			changed = true
+		}
+	}
+	if changed {
+		msg += "\n  sha256_inputs changed (source files modified since last cert):" + diff
+		msg += "\n  hint: use --semantic to accept checker-verified results regardless of digest"
+	} else {
+		msg += "\n  sha256_inputs are identical — mismatch is in another cert field"
+	}
+	return msg
+}
+
+// extractSHA256Inputs reads cert JSON and returns the sha256_inputs map, or nil.
+func extractSHA256Inputs(certPath string) map[string]string {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil
+	}
+	return extractSHA256InputsFromJSON(data)
+}
+
+// extractSHA256InputsFromCAS opens a blob from CAS by digest and extracts sha256_inputs.
+func extractSHA256InputsFromCAS(casRoot, digest string) map[string]string {
+	hexPart := strings.TrimPrefix(digest, "sha256:")
+	if len(hexPart) < 4 {
+		return nil
+	}
+	blobPath := filepath.Join(casRoot, "sha256", hexPart[:2], hexPart[2:])
+	data, err := os.ReadFile(blobPath)
+	if err != nil {
+		return nil
+	}
+	return extractSHA256InputsFromJSON(data)
+}
+
+func extractSHA256InputsFromJSON(data []byte) map[string]string {
+	var cert map[string]any
+	if err := json.Unmarshal(data, &cert); err != nil {
+		return nil
+	}
+	raw, ok := cert["sha256_inputs"]
+	if !ok {
+		return nil
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		result[k] = fmt.Sprintf("%v", v)
+	}
+	return result
+}
+
+// writePartialReplayRecord writes a debug file when some evidence items pass and some fail.
+func writePartialReplayRecord(claimID, date string, results []replayItemResult, root string, useJSON bool) {
+	hasAttempt := false
+	for _, r := range results {
+		if r.generatedDigest != "" || r.failReason != "" {
+			hasAttempt = true
+			break
+		}
+	}
+	if !hasAttempt {
+		return
+	}
+
+	type itemRecord struct {
+		Digest      string `json:"digest"`
+		Pass        bool   `json:"pass"`
+		DigestMatch bool   `json:"digest_match"`
+		CheckerExit int    `json:"checker_exit"`
+		FailReason  string `json:"fail_reason,omitempty"`
+	}
+	type partialRecord struct {
+		ClaimID  string       `json:"claim_id"`
+		Outcome  string       `json:"outcome"`
+		Date     string       `json:"date"`
+		Note     string       `json:"note"`
+		Evidence []itemRecord `json:"evidence"`
+	}
+
+	rec := partialRecord{
+		ClaimID: claimID,
+		Outcome: "partial",
+		Date:    date,
+		Note:    "debug record only — not a valid attestation; claim remains OPEN",
+	}
+	for _, r := range results {
+		rec.Evidence = append(rec.Evidence, itemRecord{
+			Digest:      r.expectedDigest,
+			Pass:        r.digestMatch && r.checkerPass,
+			DigestMatch: r.digestMatch,
+			CheckerExit: r.checkerExit,
+			FailReason:  r.failReason,
+		})
+	}
+
+	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
+	_ = os.MkdirAll(attestDir, 0o755)
+	partialPath := filepath.Join(attestDir, claimID+"-replay-partial.json")
+	data, _ := json.MarshalIndent(rec, "", "  ")
+	if writeErr := os.WriteFile(partialPath, append(data, '\n'), 0o644); writeErr == nil && !useJSON {
+		fmt.Printf("  partial debug record written to %s\n", partialPath)
+	}
+}
+
+func replayModeLabel(semantic bool) string {
+	if semantic {
+		return "semantic (checker-pass only, digest not compared)"
+	}
+	return "exact (digest + checker)"
+}
+
+// indentLines prepends prefix to every line of s.
+func indentLines(s, prefix string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
 }

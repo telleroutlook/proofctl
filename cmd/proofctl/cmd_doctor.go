@@ -143,7 +143,23 @@ func checkBridgeCheckerExecutable() doctorCheck {
 	// Extract the first word as the executable.
 	parts := strings.Fields(val)
 	exe := parts[0]
-	info, err := os.Stat(exe)
+
+	// For bare names (e.g. "python3"), resolve via PATH; for paths, check directly.
+	resolvedExe := exe
+	if !strings.Contains(exe, "/") {
+		if found, err := exec.LookPath(exe); err == nil {
+			resolvedExe = found
+		} else {
+			return doctorCheck{
+				Name:   "bridge-checker-executable",
+				OK:     false,
+				Detail: fmt.Sprintf("BRIDGE_CHECKER executable not found in PATH: %s", exe),
+				Fix:    fmt.Sprintf("install %s or use an absolute path in BRIDGE_CHECKER", exe),
+			}
+		}
+	}
+
+	info, err := os.Stat(resolvedExe)
 	if err != nil {
 		return doctorCheck{
 			Name:   "bridge-checker-executable",
@@ -156,14 +172,14 @@ func checkBridgeCheckerExecutable() doctorCheck {
 		return doctorCheck{
 			Name:   "bridge-checker-executable",
 			OK:     false,
-			Detail: fmt.Sprintf("BRIDGE_CHECKER not executable: %s", exe),
-			Fix:    fmt.Sprintf("chmod +x %s", exe),
+			Detail: fmt.Sprintf("BRIDGE_CHECKER not executable: %s", resolvedExe),
+			Fix:    fmt.Sprintf("chmod +x %s", resolvedExe),
 		}
 	}
 	return doctorCheck{
 		Name:   "bridge-checker-executable",
 		OK:     true,
-		Detail: fmt.Sprintf("BRIDGE_CHECKER executable (%s)", exe),
+		Detail: fmt.Sprintf("BRIDGE_CHECKER executable (%s)", resolvedExe),
 	}
 }
 

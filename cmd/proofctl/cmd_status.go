@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -12,12 +13,17 @@ import (
 	"github.com/telleroutlook/proofctl/internal/status"
 )
 
+const zeroDigestPrefix = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
 func cmdStatus(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	verboseFlag := fs.Bool("verbose", false, "show toolchain info for accepted claims")
 	_ = fs.Parse(args)
 
-	_, _, g, attestations := loadProjectGraph(useJSON)
+	root, cfg, g, attestations := loadProjectGraph(useJSON)
+
+	// Load policy to resolve release_target (best-effort; nil if no policy configured).
+	releaseTarget := loadReleaseTargetFromPolicy(root, cfg.PolicyFile)
 
 	statuses := status.Compute(g, attestations)
 
@@ -30,16 +36,28 @@ func cmdStatus(args []string, useJSON bool) {
 		sort.Strings(topoOrder)
 	}
 
+	// Build per-claim OPEN reason and zero-digest warnings.
+	openReasons := computeOpenReasons(g, attestations)
+	zeroDigestWarnings := findZeroDigestClaims(g)
+
 	if useJSON {
 		type claimStatusEntry struct {
-			Status      string `json:"status"`
-			BlockReason string `json:"block_reason,omitempty"`
+			Status             string `json:"status"`
+			OpenReason         string `json:"open_reason,omitempty"`
+			BlockReason        string `json:"block_reason,omitempty"`
+			UnverifiedDigest   bool   `json:"unverified_digest,omitempty"`
 		}
 		claimsMap := make(map[string]claimStatusEntry, len(statuses))
 		for id, s := range statuses {
 			entry := claimStatusEntry{Status: string(s)}
 			if att, ok := attestations[id]; ok && att.BlockReason != "" {
 				entry.BlockReason = att.BlockReason
+			}
+			if s == ir.StatusOpen {
+				entry.OpenReason = openReasons[id]
+			}
+			if zeroDigestWarnings[id] {
+				entry.UnverifiedDigest = true
 			}
 			claimsMap[id] = entry
 		}
@@ -63,13 +81,24 @@ func cmdStatus(args []string, useJSON bool) {
 			}
 		}
 		type statusOutput struct {
-			Claims        map[string]claimStatusEntry `json:"claims"`
-			Summary       summaryEntry                `json:"summary"`
-			ReleaseTarget interface{}                 `json:"release_target"`
+			Claims               map[string]claimStatusEntry `json:"claims"`
+			Summary              summaryEntry                `json:"summary"`
+			ReleaseTarget        interface{}                 `json:"release_target"`
+			UnverifiedDigests    []string                    `json:"unverified_digests,omitempty"`
 		}
+		var unverified []string
+		for id := range zeroDigestWarnings {
+			unverified = append(unverified, id)
+		}
+		sort.Strings(unverified)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(statusOutput{Claims: claimsMap, Summary: summ, ReleaseTarget: nil})
+		_ = enc.Encode(statusOutput{
+			Claims:            claimsMap,
+			Summary:           summ,
+			ReleaseTarget:     releaseTarget,
+			UnverifiedDigests: unverified,
+		})
 		return
 	}
 
@@ -89,13 +118,18 @@ func cmdStatus(args []string, useJSON bool) {
 		case ir.StatusRejected:
 			rejected++
 		}
-		reason := ""
+
+		annotation := ""
 		if att, ok := attestations[id]; ok && att.BlockReason != "" {
-			reason = "  " + att.BlockReason
+			annotation = "  " + att.BlockReason
 		} else if s == ir.StatusOpen {
-			reason = "  (no attestation)"
+			annotation = "  (" + openReasons[id] + ")"
 		}
-		fmt.Printf("%-40s %-10s%s\n", id, strings.ToUpper(string(s)), reason)
+		unverifiedMark := ""
+		if zeroDigestWarnings[id] {
+			unverifiedMark = " [UNVERIFIED_DIGEST]"
+		}
+		fmt.Printf("%-40s %-10s%s%s\n", id, strings.ToUpper(string(s)), unverifiedMark, annotation)
 		if *verboseFlag && s == ir.StatusAccepted {
 			if att, ok := attestations[id]; ok && len(att.Toolchain) > 0 {
 				keys := make([]string, 0, len(att.Toolchain))
@@ -111,5 +145,74 @@ func cmdStatus(args []string, useJSON bool) {
 	}
 	fmt.Printf("\nSummary: %d accepted, %d blocked, %d open, %d rejected\n",
 		accepted, blocked, open, rejected)
-	fmt.Println("release_target: null")
+	if releaseTarget != nil {
+		fmt.Printf("release_target: %s\n", *releaseTarget)
+	} else {
+		fmt.Println("release_target: (not configured — set policy_file in .proofctl/config.json)")
+	}
+
+	if len(zeroDigestWarnings) > 0 {
+		ids := make([]string, 0, len(zeroDigestWarnings))
+		for id := range zeroDigestWarnings {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		fmt.Printf("\nWARNING: %d claim(s) have zero/placeholder statement digest [UNVERIFIED_DIGEST]:\n", len(ids))
+		for _, id := range ids {
+			fmt.Printf("  %s — run 'proofctl compile --fix-digests' to resolve\n", id)
+		}
+	}
+}
+
+// computeOpenReasons returns a human-readable open reason for each OPEN claim.
+// Distinguishes between "no attestation" and "no evidence registered".
+func computeOpenReasons(g interface {
+	Claims() []*ir.Claim
+}, attestations map[string]*ir.Attestation) map[string]string {
+	reasons := make(map[string]string)
+	for _, c := range g.Claims() {
+		if _, hasAtt := attestations[c.ID]; hasAtt {
+			continue
+		}
+		if len(c.Evidence) == 0 {
+			reasons[c.ID] = "no evidence registered"
+		} else {
+			reasons[c.ID] = "no attestation"
+		}
+	}
+	return reasons
+}
+
+// findZeroDigestClaims returns the set of claim IDs whose statement.digest is zero/empty.
+func findZeroDigestClaims(g interface {
+	Claims() []*ir.Claim
+}) map[string]bool {
+	result := make(map[string]bool)
+	for _, c := range g.Claims() {
+		d := c.Statement.Digest
+		if d == "" || d == zeroDigestPrefix {
+			result[c.ID] = true
+		}
+	}
+	return result
+}
+
+// loadReleaseTargetFromPolicy reads the policy file and returns the target claim ID,
+// or nil if the policy cannot be loaded or has no target.
+func loadReleaseTargetFromPolicy(root, policyFile string) *string {
+	if policyFile == "" {
+		return nil
+	}
+	polPath := filepath.Join(root, policyFile)
+	data, err := os.ReadFile(polPath)
+	if err != nil {
+		return nil
+	}
+	var pol struct {
+		Target string `json:"target"`
+	}
+	if err := json.Unmarshal(data, &pol); err != nil || pol.Target == "" {
+		return nil
+	}
+	return &pol.Target
 }

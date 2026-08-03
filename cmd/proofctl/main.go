@@ -119,7 +119,6 @@ Subcommands:
   init      Initialize a new proof graph project (--domain cap|lrat|qmd)
   domains   List known domains (domains list)
   compile   Compile a proof source file to ProofGraph IR
-  check     Run checkers for one or more claims
   verify    Verify attestation integrity
   explain   Explain the status of a claim
   graph     Print the claim dependency graph

@@ -101,7 +101,7 @@ def _read_cert_field(cert_path: Path, field: str) -> str:
 def main() -> None:
     checker_cmd = os.environ.get("BRIDGE_CHECKER", "")
     if not checker_cmd:
-        _die(2, "BRIDGE_CHECKER environment variable not set")
+        _die(3, "BRIDGE_CHECKER environment variable not set")
 
     inp = _read_input()
     claim_id: str = inp.get("claim_id", "")
