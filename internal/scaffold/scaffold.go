@@ -68,6 +68,12 @@ var KnownDomains = []Domain{
 			"example.mm": "templates/metamath-example.mm",
 		},
 	},
+	{
+		Name:           "smt",
+		Description:    "SMT/Alethe/DRAT domain: verify SMT-LIB2 unsatisfiability via Alethe or DRAT proof certificates",
+		PolicyTemplate: "templates/smt-policy.json",
+		GraphTemplate:  "templates/smt-graph.json",
+	},
 }
 
 // Lookup returns the Domain for name, or an error if unknown.
@@ -77,7 +83,7 @@ func Lookup(name string) (Domain, error) {
 			return d, nil
 		}
 	}
-	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath)", name)
+	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt)", name)
 }
 
 // Init writes all scaffold files for domain into root.

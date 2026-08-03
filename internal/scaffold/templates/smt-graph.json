@@ -1,0 +1,65 @@
+{
+  "claims": [
+    {
+      "id": "def-REPLACE-ME-formula",
+      "kind": "definition",
+      "statement": {
+        "text": "SMT-LIB2 formula REPLACE-ME.",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "evidence": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+      "checker_policy": ""
+    },
+    {
+      "id": "lem-REPLACE-ME-unsat",
+      "kind": "lemma",
+      "statement": {
+        "text": "Formula REPLACE-ME is unsatisfiable.",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": ["def-REPLACE-ME-formula"],
+      "evidence": [
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+      ],
+      "checker_policy": "smt-checker-v1"
+    },
+    {
+      "id": "thm-REPLACE-ME-verified",
+      "kind": "theorem",
+      "statement": {
+        "text": "ALETHE certificate verifies UNSAT for REPLACE-ME.",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": ["def-REPLACE-ME-formula", "lem-REPLACE-ME-unsat"],
+      "evidence": ["sha256:0000000000000000000000000000000000000000000000000000000000000001"],
+      "checker_policy": "smt-checker-v1"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "smt-checker-v1",
+      "protocol_version": 1,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {
+        "kind": "native",
+        "cmd": ["python3", "${PROOFCTL_ADAPTERS}/smt/bridge.py", "--format", "alethe"]
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "media_type": "application/x-smt2",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 0,
+      "path_hint": "REPLACE-ME.smt2"
+    },
+    {
+      "media_type": "application/x-smt-proof",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+      "size": 0,
+      "path_hint": "REPLACE-ME.alethe"
+    }
+  ]
+}
