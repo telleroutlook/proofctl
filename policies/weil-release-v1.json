@@ -10,7 +10,8 @@
   ],
   "forbidden_assurances": [
     "ai-review",
-    "assumption"
+    "assumption",
+    "shadow-review"
   ],
   "required_claims": [
     "def-frozen-model",

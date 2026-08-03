@@ -317,3 +317,86 @@ func TestReleaseCertifiedRadiusEmptyOnFail(t *testing.T) {
 		t.Errorf("expected empty CertifiedRadius on fail, got %q", rs.CertifiedRadius)
 	}
 }
+
+// TestRelease_ShadowModeBlocked verifies that when all attestations use shadow-review assurance
+// (a forbidden type), DryRun returns false and blocked attestations with block reasons
+// are surfaced in the defects map of STATUS.json.
+func TestRelease_ShadowModeBlocked(t *testing.T) {
+	t.Parallel()
+	outDir := t.TempDir()
+	g := &Gate{OutputDir: outDir}
+
+	d := dag.New()
+	for _, id := range []string{"lem-d4-kernel-bound", "lem-ab-intersection", "thm-main-radius-030"} {
+		if err := d.AddClaim(&ir.Claim{ID: id, Kind: "theorem"}); err != nil {
+			t.Fatalf("AddClaim(%q): %v", id, err)
+		}
+	}
+
+	const shadowAssurance ir.Assurance = "shadow-review"
+	atts := map[string]*ir.Attestation{
+		"lem-d4-kernel-bound": {
+			ClaimID:     "lem-d4-kernel-bound",
+			Outcome:     string(ir.StatusBlocked),
+			Assurance:   shadowAssurance,
+			BlockReason: "D4: kernel-bound expected primitive keys not matched; v1/v2 checker result conflict",
+		},
+		"lem-ab-intersection": {
+			ClaimID:     "lem-ab-intersection",
+			Outcome:     string(ir.StatusBlocked),
+			Assurance:   shadowAssurance,
+			BlockReason: "D8: Path A keys and Path B keys share no common primitives; intersection empty",
+		},
+		"thm-main-radius-030": {
+			ClaimID:     "thm-main-radius-030",
+			Outcome:     string(ir.StatusBlocked),
+			Assurance:   shadowAssurance,
+			BlockReason: "D18: thm-main-radius-030 blocked — D4 and D8 unresolved; no certified radius",
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:             "1",
+		Target:              "thm-main-radius-030",
+		RequiredClaims:      []string{"lem-d4-kernel-bound", "lem-ab-intersection", "thm-main-radius-030"},
+		ForbiddenAssurances: []string{"shadow-review"},
+	}
+
+	// DryRun must return false.
+	pass, blockers := g.DryRun(d, atts, pol)
+	if pass {
+		t.Error("DryRun: expected fail for shadow-review attestations, got pass")
+	}
+	if len(blockers) == 0 {
+		t.Error("DryRun: expected non-empty blockers")
+	}
+
+	// Release must write STATUS.json with released=false and defects map populated.
+	relPass, _, err := g.Release(d, atts, pol)
+	if err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if relPass {
+		t.Error("Release: expected fail, got pass")
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, StatusFile))
+	if err != nil {
+		t.Fatalf("read STATUS.json: %v", err)
+	}
+	var rs ReleaseStatus
+	if err := json.Unmarshal(data, &rs); err != nil {
+		t.Fatalf("unmarshal STATUS.json: %v", err)
+	}
+	if rs.Released {
+		t.Error("STATUS.json: expected released=false")
+	}
+	if len(rs.Defects) == 0 {
+		t.Error("STATUS.json: expected non-empty defects map for blocked shadow attestations")
+	}
+	// Verify D4 and D8 block reasons are surfaced.
+	for _, claimID := range []string{"lem-d4-kernel-bound", "lem-ab-intersection", "thm-main-radius-030"} {
+		if reason, ok := rs.Defects[claimID]; !ok || reason == "" {
+			t.Errorf("STATUS.json: defects[%q] missing or empty", claimID)
+		}
+	}
+}

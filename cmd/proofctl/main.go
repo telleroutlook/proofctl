@@ -37,6 +37,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/runner"
 	"github.com/telleroutlook/proofctl/internal/status"
 	"github.com/telleroutlook/proofctl/internal/verify"
+	weilpkg "github.com/telleroutlook/proofctl/internal/weil"
 )
 
 func main() {
@@ -235,33 +236,26 @@ func cmdInit(args []string, useJSON bool) {
 }
 
 // cmdCompile implements the compile subcommand.
+//
+// Usage:
+//
+//	proofctl compile [--adapter weil|json] <source-file>
 func cmdCompile(args []string, useJSON bool) {
-	if len(args) == 0 {
-		die(useJSON, errors.CodeInvalidInput, "usage: proofctl compile <file>")
+	fs := flag.NewFlagSet("compile", flag.ContinueOnError)
+	adapterFlag := fs.String("adapter", "json", "adapter type: json or weil")
+	if err := fs.Parse(args); err != nil {
+		die(useJSON, errors.CodeInvalidInput, "compile: "+err.Error())
 	}
-	srcFile := args[0]
-	data, err := os.ReadFile(srcFile)
+	if fs.NArg() == 0 {
+		die(useJSON, errors.CodeInvalidInput, "usage: proofctl compile [--adapter weil|json] <source-file>")
+	}
+	srcFile := fs.Arg(0)
+	src, err := os.ReadFile(srcFile)
 	if err != nil {
 		die(useJSON, errors.CodeInvalidInput, "cannot read source file: "+err.Error())
 	}
 
-	pg, err := compile.Compile(data, compile.FormatJSON)
-	if err != nil {
-		die(useJSON, errors.CodeInvalidInput, err.Error())
-	}
-
-	// Build and validate DAG.
-	g := dag.New()
-	for i := range pg.Claims {
-		if err := g.AddClaim(&pg.Claims[i]); err != nil {
-			die(useJSON, errors.CodeDuplicateID, err.Error())
-		}
-	}
-	if err := g.Validate(); err != nil {
-		die(useJSON, errors.CodeCycleDetected, err.Error())
-	}
-
-	// Find project root to write graph.json.
+	// Find project root.
 	cwd, err := os.Getwd()
 	if err != nil {
 		die(useJSON, errors.CodeInternalError, err.Error())
@@ -271,19 +265,135 @@ func cmdCompile(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
 
+	var pg *ir.ProofGraph
+	var shadowAttestations map[string]*ir.Attestation
+	isShadow := false
+
+	switch *adapterFlag {
+	case "weil":
+		isShadow = true
+		pg, shadowAttestations, err = compileWeil(src)
+		if err != nil {
+			die(useJSON, errors.CodeInvalidInput, err.Error())
+		}
+	case "json":
+		pg, err = compile.Compile(src, compile.FormatJSON)
+		if err != nil {
+			die(useJSON, errors.CodeInvalidInput, err.Error())
+		}
+	default:
+		die(useJSON, errors.CodeInvalidInput, "unknown adapter: "+*adapterFlag+"; use json or weil")
+	}
+
+	// Build and validate DAG.
+	g := dag.New()
+	for i := range pg.Claims {
+		if addErr := g.AddClaim(&pg.Claims[i]); addErr != nil {
+			die(useJSON, errors.CodeDuplicateID, addErr.Error())
+		}
+	}
+	if valErr := g.Validate(); valErr != nil {
+		die(useJSON, errors.CodeCycleDetected, valErr.Error())
+	}
+
+	// Write graph.json atomically.
 	outPath := filepath.Join(root, config.DirName, config.GraphFile)
-	out, _ := json.MarshalIndent(pg, "", "  ")
-	out = append(out, '\n')
-	if err := os.WriteFile(outPath, out, 0o644); err != nil {
-		die(useJSON, errors.CodeInternalError, "cannot write graph.json: "+err.Error())
+	if writeErr := atomicWriteJSON(outPath, pg); writeErr != nil {
+		die(useJSON, errors.CodeInternalError, "cannot write graph.json: "+writeErr.Error())
+	}
+
+	// Write shadow attestations if using weil adapter.
+	if isShadow && len(shadowAttestations) > 0 {
+		attestDir := filepath.Join(root, config.DirName, config.AttestDir)
+		if mkErr := os.MkdirAll(attestDir, 0o755); mkErr != nil {
+			die(useJSON, errors.CodeInternalError, "cannot create attestations dir: "+mkErr.Error())
+		}
+		for claimID, att := range shadowAttestations {
+			attPath := filepath.Join(attestDir, claimID+".json")
+			if writeErr := atomicWriteJSON(attPath, att); writeErr != nil {
+				die(useJSON, errors.CodeInternalError, "cannot write attestation "+claimID+": "+writeErr.Error())
+			}
+		}
 	}
 
 	if useJSON {
+		out := map[string]any{
+			"claims":  len(pg.Claims),
+			"adapter": *adapterFlag,
+			"graph":   outPath,
+		}
+		if isShadow {
+			out["shadow"] = true
+		}
 		enc := json.NewEncoder(os.Stdout)
-		_ = enc.Encode(map[string]any{"compiled": len(pg.Claims), "output": outPath})
+		_ = enc.Encode(out)
 	} else {
-		fmt.Printf("Compiled %d claims.\n", len(pg.Claims))
+		suffix := ""
+		if isShadow {
+			suffix = " [adapter: weil, shadow mode]"
+		}
+		fmt.Printf("Compiled %d claims from %s%s\n", len(pg.Claims), srcFile, suffix)
 	}
+}
+
+// compileWeil compiles a source file using the Weil adapter in shadow mode.
+// It returns the ProofGraph and a map of shadow attestations keyed by claim ID.
+// The source file is expected to be a JSON ProofGraph; the weil adapter
+// annotates each claim with shadow attestations from the known-defect table.
+func compileWeil(src []byte) (*ir.ProofGraph, map[string]*ir.Attestation, error) {
+	pg, err := compile.Compile(src, compile.FormatJSON)
+	if err != nil {
+		return nil, nil, fmt.Errorf("weil adapter: %w", err)
+	}
+
+	defects := weilpkg.DefectsByClaimID()
+	atts := make(map[string]*ir.Attestation, len(pg.Claims))
+	for i := range pg.Claims {
+		c := &pg.Claims[i]
+		if defect, ok := defects[c.ID]; ok {
+			atts[c.ID] = weilpkg.BuildShadowAttestation(c, defect)
+		} else {
+			atts[c.ID] = weilpkg.BuildOpenAttestation(c)
+		}
+	}
+	return pg, atts, nil
+}
+
+// atomicWriteJSON marshals v as indented JSON and writes it atomically to path
+// using a temp file + rename pattern.
+func atomicWriteJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("write temp: %w", writeErr)
+	}
+	if syncErr := tmp.Sync(); syncErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("sync: %w", syncErr)
+	}
+	if closeErr := tmp.Close(); closeErr != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close: %w", closeErr)
+	}
+	if renameErr := os.Rename(tmpName, path); renameErr != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("rename: %w", renameErr)
+	}
+	return nil
 }
 
 // cmdStatus implements the status subcommand.
@@ -292,30 +402,66 @@ func cmdStatus(_ []string, useJSON bool) {
 
 	statuses := status.Compute(g, attestations)
 
+	// Build topological order (leaf claims first, main theorem last).
+	topoOrder, topoErr := topoSort(g)
+	if topoErr != nil {
+		// Fall back to sorted IDs if topo sort fails (should not happen after Validate).
+		topoOrder = make([]string, 0, len(statuses))
+		for id := range statuses {
+			topoOrder = append(topoOrder, id)
+		}
+		sort.Strings(topoOrder)
+	}
+
 	if useJSON {
-		claimsMap := make(map[string]string, len(statuses))
+		type claimStatusEntry struct {
+			Status      string `json:"status"`
+			BlockReason string `json:"block_reason,omitempty"`
+		}
+		claimsMap := make(map[string]claimStatusEntry, len(statuses))
 		for id, s := range statuses {
-			claimsMap[id] = string(s)
+			entry := claimStatusEntry{Status: string(s)}
+			if att, ok := attestations[id]; ok && att.BlockReason != "" {
+				entry.BlockReason = att.BlockReason
+			}
+			claimsMap[id] = entry
+		}
+		type summaryEntry struct {
+			Accepted int `json:"accepted"`
+			Blocked  int `json:"blocked"`
+			Open     int `json:"open"`
+			Rejected int `json:"rejected"`
+		}
+		var summ summaryEntry
+		for _, s := range statuses {
+			switch s {
+			case ir.StatusAccepted:
+				summ.Accepted++
+			case ir.StatusBlocked:
+				summ.Blocked++
+			case ir.StatusOpen:
+				summ.Open++
+			case ir.StatusRejected:
+				summ.Rejected++
+			}
 		}
 		type statusOutput struct {
-			Claims          map[string]string `json:"claims"`
-			CertifiedRadius interface{}       `json:"certified_radius"`
+			Claims          map[string]claimStatusEntry `json:"claims"`
+			Summary         summaryEntry                `json:"summary"`
+			CertifiedRadius interface{}                 `json:"certified_radius"`
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(statusOutput{Claims: claimsMap, CertifiedRadius: nil})
+		_ = enc.Encode(statusOutput{Claims: claimsMap, Summary: summ, CertifiedRadius: nil})
 		return
 	}
 
-	// Human output: sorted table.
-	ids := make([]string, 0, len(statuses))
-	for id := range statuses {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	// Human output: topological order table with block reasons.
+	fmt.Println("Proof Graph Status")
+	fmt.Println("==================")
 
 	var accepted, open, blocked, rejected int
-	for _, id := range ids {
+	for _, id := range topoOrder {
 		s := statuses[id]
 		switch s {
 		case ir.StatusAccepted:
@@ -327,24 +473,40 @@ func cmdStatus(_ []string, useJSON bool) {
 		case ir.StatusRejected:
 			rejected++
 		}
-		fmt.Printf("%-40s %s\n", id, s)
+		reason := ""
+		if att, ok := attestations[id]; ok && att.BlockReason != "" {
+			reason = "  " + att.BlockReason
+		} else if s == ir.StatusOpen {
+			reason = "  (no attestation)"
+		}
+		fmt.Printf("%-40s %-10s%s\n", id, strings.ToUpper(string(s)), reason)
 	}
-	fmt.Printf("\naccepted=%d  open=%d  blocked=%d  rejected=%d\n", accepted, open, blocked, rejected)
+	fmt.Printf("\nSummary: %d accepted, %d blocked, %d open, %d rejected\n",
+		accepted, blocked, open, rejected)
+	fmt.Println("certified_radius: null")
 }
 
 // cmdGraph implements the graph subcommand.
 func cmdGraph(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("graph", flag.ContinueOnError)
 	targetFlag := fs.String("target", "", "show closure for @claim-id")
+	showStatusFlag := fs.Bool("show-status", false, "show claim status inline")
 	_ = fs.Parse(args)
 
-	_, _, g, _ := loadProjectGraph(useJSON)
+	_, _, g, attestations := loadProjectGraph(useJSON)
 
 	target := strings.TrimPrefix(*targetFlag, "@")
+
+	// Compute statuses if requested.
+	var statuses map[string]ir.Status
+	if *showStatusFlag {
+		statuses = status.Compute(g, attestations)
+	}
 
 	type claimNode struct {
 		ID        string   `json:"id"`
 		Kind      string   `json:"kind"`
+		Status    string   `json:"status,omitempty"`
 		DependsOn []string `json:"depends_on"`
 	}
 
@@ -366,12 +528,20 @@ func cmdGraph(args []string, useJSON bool) {
 			}
 			for _, c := range claims {
 				if claimSet[c.ID] {
-					nodes = append(nodes, claimNode{ID: c.ID, Kind: c.Kind, DependsOn: c.DependsOn})
+					node := claimNode{ID: c.ID, Kind: c.Kind, DependsOn: c.DependsOn}
+					if statuses != nil {
+						node.Status = string(statuses[c.ID])
+					}
+					nodes = append(nodes, node)
 				}
 			}
 		} else {
 			for _, c := range claims {
-				nodes = append(nodes, claimNode{ID: c.ID, Kind: c.Kind, DependsOn: c.DependsOn})
+				node := claimNode{ID: c.ID, Kind: c.Kind, DependsOn: c.DependsOn}
+				if statuses != nil {
+					node.Status = string(statuses[c.ID])
+				}
+				nodes = append(nodes, node)
 			}
 		}
 		enc := json.NewEncoder(os.Stdout)
@@ -398,9 +568,13 @@ func cmdGraph(args []string, useJSON bool) {
 		}
 		deps := strings.Join(c.DependsOn, ", ")
 		if deps == "" {
-			deps = "(none)"
+			deps = "(no deps)"
 		}
-		fmt.Printf("%s [%s] -> %s\n", c.ID, c.Kind, deps)
+		if statuses != nil {
+			fmt.Printf("%s [%s] %s -> %s\n", c.ID, c.Kind, strings.ToUpper(string(statuses[c.ID])), deps)
+		} else {
+			fmt.Printf("%s [%s] -> %s\n", c.ID, c.Kind, deps)
+		}
 	}
 }
 
@@ -513,12 +687,13 @@ func cmdExplain(args []string, useJSON bool) {
 
 	if useJSON {
 		type explainOutput struct {
-			ID        string          `json:"id"`
-			Kind      string          `json:"kind"`
-			Status    string          `json:"status"`
-			Assurance string          `json:"assurance,omitempty"`
-			Statement ir.Statement    `json:"statement"`
-			DependsOn []string        `json:"depends_on"`
+			ID          string          `json:"id"`
+			Kind        string          `json:"kind"`
+			Status      string          `json:"status"`
+			Assurance   string          `json:"assurance,omitempty"`
+			BlockReason string          `json:"block_reason,omitempty"`
+			Statement   ir.Statement    `json:"statement"`
+			DependsOn   []string        `json:"depends_on"`
 			Attestation *ir.Attestation `json:"attestation,omitempty"`
 		}
 		out := explainOutput{
@@ -530,6 +705,7 @@ func cmdExplain(args []string, useJSON bool) {
 		}
 		if att != nil {
 			out.Assurance = string(att.Assurance)
+			out.BlockReason = att.BlockReason
 			out.Attestation = att
 		}
 		enc := json.NewEncoder(os.Stdout)
@@ -538,21 +714,24 @@ func cmdExplain(args []string, useJSON bool) {
 		return
 	}
 
-	fmt.Printf("Claim:    %s\n", c.ID)
-	fmt.Printf("Kind:     %s\n", c.Kind)
-	fmt.Printf("Status:   %s\n", claimStatus)
-	fmt.Printf("Statement: %s\n", c.Statement.Text)
-	if len(c.DependsOn) > 0 {
-		fmt.Printf("Depends on: %s\n", strings.Join(c.DependsOn, ", "))
-	}
+	fmt.Printf("Claim:  %s\n", c.ID)
+	fmt.Printf("Kind:   %s\n", c.Kind)
+	fmt.Printf("Status: %s\n", strings.ToUpper(string(claimStatus)))
 	if att != nil {
-		fmt.Printf("Assurance: %s\n", att.Assurance)
+		assuranceNote := ""
+		if att.Assurance == weilpkg.ShadowAssurance {
+			assuranceNote = " (shadow mode — not eligible for release)"
+		}
+		fmt.Printf("Assurance: %s%s\n", att.Assurance, assuranceNote)
 		if att.BlockReason != "" {
 			fmt.Printf("Block reason: %s\n", att.BlockReason)
 		}
 	}
-	if claimStatus == ir.StatusBlocked {
-		// Find blocking deps.
+	if len(c.DependsOn) > 0 {
+		fmt.Printf("Depends on: %s\n", strings.Join(c.DependsOn, ", "))
+	}
+	if claimStatus == ir.StatusBlocked && att == nil {
+		// No direct attestation: show blocking deps.
 		closure, _ := g.Closure(claimID)
 		for _, depID := range closure {
 			depAtt, ok := attestations[depID]
@@ -676,26 +855,39 @@ func cmdRelease(args []string, useJSON bool) {
 	gate := &release.Gate{OutputDir: filepath.Join(root, config.DirName)}
 
 	type releaseOutput struct {
-		Pass      bool     `json:"pass"`
-		Blockers  []string `json:"blockers"`
-		Released  bool     `json:"released"`
+		Pass     bool     `json:"pass"`
+		Blockers []string `json:"blockers"`
+		Released bool     `json:"released"`
+		Defects  map[string]string `json:"defects,omitempty"`
+		CertifiedRadius interface{} `json:"certified_radius"`
 	}
+
+	// Collect D-defect reasons for human output.
+	defects := collectDefects(attestations)
 
 	if *dryRunFlag {
 		pass, blockers := gate.DryRun(g, attestations, pol)
 		if useJSON {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			_ = enc.Encode(releaseOutput{Pass: pass, Blockers: blockers, Released: false})
+			out := releaseOutput{Pass: pass, Blockers: blockers, Released: false, CertifiedRadius: nil}
+			if len(defects) > 0 {
+				out.Defects = defects
+			}
+			_ = enc.Encode(out)
 			return
 		}
 		if pass {
-			fmt.Println("PASS: release gate passed (dry run)")
+			fmt.Println("RELEASE DRY-RUN: PASS")
 		} else {
-			fmt.Println("FAIL: release gate failed (dry run)")
+			fmt.Printf("RELEASE DRY-RUN: BLOCKED\nBlockers (%d):\n", len(blockers)+len(defects))
 			for _, b := range blockers {
-				fmt.Printf("  - %s\n", b)
+				fmt.Printf("  [POLICY] %s\n", b)
 			}
+			for claimID, reason := range defects {
+				fmt.Printf("  [DEFECT] %s: %s\n", claimID, reason)
+			}
+			fmt.Println("\ncertified_radius: null")
 		}
 		return
 	}
@@ -708,18 +900,41 @@ func cmdRelease(args []string, useJSON bool) {
 	if useJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(releaseOutput{Pass: pass, Blockers: blockers, Released: pass})
+		out := releaseOutput{Pass: pass, Blockers: blockers, Released: pass, CertifiedRadius: nil}
+		if pass {
+			out.CertifiedRadius = pol.Target
+		}
+		if len(defects) > 0 {
+			out.Defects = defects
+		}
+		_ = enc.Encode(out)
 		return
 	}
 
 	if pass {
 		fmt.Println("PASS: release gate passed")
+		fmt.Printf("certified_radius: %s\n", pol.Target)
 	} else {
-		fmt.Println("FAIL: release gate failed")
+		fmt.Printf("RELEASE BLOCKED\nBlockers (%d):\n", len(blockers)+len(defects))
 		for _, b := range blockers {
-			fmt.Printf("  - %s\n", b)
+			fmt.Printf("  [POLICY] %s\n", b)
+		}
+		for claimID, reason := range defects {
+			fmt.Printf("  [DEFECT] %s: %s\n", claimID, reason)
+		}
+		fmt.Println("\ncertified_radius: null")
+	}
+}
+
+// collectDefects returns a map of claim ID → block_reason for all blocked attestations.
+func collectDefects(attestations map[string]*ir.Attestation) map[string]string {
+	defects := make(map[string]string)
+	for id, att := range attestations {
+		if att.BlockReason != "" {
+			defects[id] = att.BlockReason
 		}
 	}
+	return defects
 }
 
 // cmdCheck implements the check subcommand (not yet implemented).

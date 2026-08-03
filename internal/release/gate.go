@@ -22,10 +22,11 @@ const StatusFile = "STATUS.json"
 
 // ReleaseStatus is written to STATUS.json on a successful release.
 type ReleaseStatus struct {
-	CertifiedRadius string   `json:"certified_radius"`
-	PolicyVersion   string   `json:"policy_version"`
-	Blockers        []string `json:"blockers,omitempty"`
-	Released        bool     `json:"released"`
+	CertifiedRadius string            `json:"certified_radius"`
+	PolicyVersion   string            `json:"policy_version"`
+	Blockers        []string          `json:"blockers,omitempty"`
+	Defects         map[string]string `json:"defects,omitempty"` // D-number → block_reason
+	Released        bool              `json:"released"`
 }
 
 // Gate performs release checks for a proof graph.
@@ -38,6 +39,7 @@ type checkResult struct {
 	pass     bool
 	blockers []string
 	statuses map[string]ir.Status
+	defects  map[string]string // claim ID → block_reason
 }
 
 // check is the single shared implementation for DryRun and Release.
@@ -62,10 +64,19 @@ func (g *Gate) check(
 		blockers = append(blockers, policyBlockers...)
 	}
 
+	// Collect D-defect reasons from blocked attestations.
+	defects := make(map[string]string)
+	for id, att := range attestations {
+		if att.BlockReason != "" {
+			defects[id] = att.BlockReason
+		}
+	}
+
 	return checkResult{
 		pass:     len(blockers) == 0,
 		blockers: blockers,
 		statuses: statuses,
+		defects:  defects,
 	}
 }
 
@@ -94,6 +105,7 @@ func (g *Gate) Release(
 		Released:      r.pass,
 		PolicyVersion: pol.Version,
 		Blockers:      r.blockers,
+		Defects:       r.defects,
 	}
 	if r.pass {
 		rs.CertifiedRadius = pol.Target
