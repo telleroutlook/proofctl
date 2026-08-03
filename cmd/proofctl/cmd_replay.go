@@ -325,6 +325,9 @@ func cmdReplay(args []string, useJSON bool) {
 				"semantic_replay":  fmt.Sprintf("%v", *semanticFlag),
 			},
 		}
+		if sd, sdErr := ir.DigestOf(&att); sdErr == nil {
+			att.SelfDigest = sd
+		}
 		attestDir := filepath.Join(root, config.DirName, config.AttestDir)
 		if err := os.MkdirAll(attestDir, 0o755); err != nil {
 			die(useJSON, errors.CodeInternalError, "replay: cannot create attestation dir: "+err.Error())
@@ -954,6 +957,9 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 					"semantic_replay":  fmt.Sprintf("%v", entry.Semantic),
 					"batch_entry":      fmt.Sprintf("%d", entryIdx),
 				},
+			}
+			if sd, sdErr := ir.DigestOf(&att); sdErr == nil {
+				att.SelfDigest = sd
 			}
 			attPath := filepath.Join(attestDir, claimID+".json")
 			attData, _ := json.MarshalIndent(att, "", "  ")

@@ -124,7 +124,7 @@ Subcommands:
   init      Initialize a new proof graph project (--domain cap|lrat|qmd)
   domains   List known domains (domains list)
   compile   Compile a proof source file to ProofGraph IR
-  check     Run checker against CAS evidence for a claim (--all | --no-cache)
+  check     Run checker against CAS evidence for a claim (--all | --no-cache | --evidence <digest>)
   verify    Verify attestation integrity
   attest    Record a manual attestation (--batch, diff, --force, --key)
   explain   Explain the status of a claim
@@ -132,7 +132,7 @@ Subcommands:
   frontier  List unresolved direct dependencies of a claim
   impact    List claims that depend on a given claim
   cache     Manage the checker result cache (audit|invalidate [--all]|show-key)
-  cas       Manage the content-addressed store (import|import-dir|list|gc)
+  cas       Manage the content-addressed store (import|import-dir|list|gc [--yes])
   pin       Pin a checker binary digest and command (pin checker --cmd ...)
   env       Manage checker runtime environment (verify|snapshot|show)
   replay    Cold-start generator+checker replay (--batch, --skip-if-accepted)

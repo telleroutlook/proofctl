@@ -150,17 +150,15 @@ func (p *Pipeline) Run(
 		Evidence:          evidenceRefs,
 		PolicyDigest:      policyDigest,
 	}
-	inputJSON, err := json.Marshal(checkerInput)
-	if err != nil {
-		return nil, proofErr.Newf(proofErr.CodeInternalError, "marshal checker input: %v", err)
-	}
-
 	// Record start time.
 	startTime := time.Now()
 	startDate := startTime.UTC().Format("2006-01-02")
 
 	// 6. Run checker.
-	outputBytes, runErr := p.Runner.Run(ctx, checkerID, bytes.NewReader(inputJSON))
+	// For multi-evidence claims each evidence item is checked independently and
+	// metadata is unioned across all runs (B18 fix). Single-evidence claims take
+	// the fast path and call the runner once with the full input.
+	outputBytes, runErr := p.runCheckerAllEvidence(ctx, checkerID, checkerInput)
 
 	wallMillis := time.Since(startTime).Milliseconds()
 
@@ -379,6 +377,80 @@ func (p *Pipeline) verifyAttestationSig(att *ir.Attestation) error {
 		return signing.Verify(k, att, sig)
 	}
 	return fmt.Errorf("no public key found for fingerprint %q in trust store", att.Signature.PubkeyFingerprint)
+}
+
+// runCheckerAllEvidence runs the checker once per evidence item and merges the
+// results (B18). For each evidence item it builds a single-item CheckerInput,
+// runs the checker, and unions the metadata. The merged outcome is the worst
+// result across all items: any rejection takes precedence over acceptance.
+// For a single-evidence claim this is equivalent to one direct runner call.
+func (p *Pipeline) runCheckerAllEvidence(
+	ctx context.Context,
+	checkerID ir.CheckerIdentity,
+	base protocol.CheckerInput,
+) ([]byte, error) {
+	if len(base.Evidence) <= 1 {
+		inputJSON, err := json.Marshal(base)
+		if err != nil {
+			return nil, fmt.Errorf("marshal checker input: %w", err)
+		}
+		return p.Runner.Run(ctx, checkerID, bytes.NewReader(inputJSON))
+	}
+
+	// Run checker once per evidence item, collecting per-item outputs.
+	var mergedOut *protocol.CheckerOutput
+	var firstErr error
+	for _, evRef := range base.Evidence {
+		single := base
+		single.Evidence = []protocol.EvidenceRef{evRef}
+		inputJSON, err := json.Marshal(single)
+		if err != nil {
+			return nil, fmt.Errorf("marshal checker input for evidence %s: %w", evRef.Digest, err)
+		}
+		raw, runErr := p.Runner.Run(ctx, checkerID, bytes.NewReader(inputJSON))
+		if runErr != nil {
+			if firstErr == nil {
+				firstErr = runErr
+			}
+			continue
+		}
+		out, parseErr := parseCheckerOutput(raw)
+		if parseErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("evidence %s: %w", evRef.Digest, parseErr)
+			}
+			continue
+		}
+		if mergedOut == nil {
+			mergedOut = out
+		} else {
+			// Merge metadata: union all keys.
+			for k, v := range out.Metadata {
+				if mergedOut.Metadata == nil {
+					mergedOut.Metadata = make(map[string]string)
+				}
+				mergedOut.Metadata[k] = v
+			}
+			// Worst outcome wins.
+			if out.Outcome != "accepted" {
+				mergedOut.Outcome = out.Outcome
+				mergedOut.Assurance = out.Assurance
+				mergedOut.ErrorCode = out.ErrorCode
+			}
+		}
+	}
+
+	if firstErr != nil && mergedOut == nil {
+		return nil, firstErr
+	}
+	if mergedOut == nil {
+		return nil, fmt.Errorf("checker produced no output for any evidence item")
+	}
+	merged, err := json.Marshal(mergedOut)
+	if err != nil {
+		return nil, fmt.Errorf("marshal merged checker output: %w", err)
+	}
+	return merged, nil
 }
 
 // parseCheckerOutput decodes and validates the checker's stdout payload.

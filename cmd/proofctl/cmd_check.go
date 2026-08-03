@@ -35,6 +35,7 @@ func cmdCheck(args []string, useJSON bool) {
 	claimFlag := fs.String("claim", "", "claim ID to check (alternative to @<claim-id> positional arg)")
 	noCacheFlag := fs.Bool("no-cache", false, "skip cache lookup and re-run checker unconditionally")
 	allFlag := fs.Bool("all", false, "check all claims that have a checker_policy and CAS evidence")
+	evidenceFlag := fs.String("evidence", "", "only run checker for this specific evidence digest (single-evidence override)")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, "check: "+err.Error())
 	}
@@ -86,6 +87,18 @@ func cmdCheck(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, fmt.Sprintf("check: no checker found for policy %q", claim.CheckerPolicy))
 	}
 	evidence := findEvidence(pg, claim.Evidence)
+	if *evidenceFlag != "" {
+		filtered := make([]ir.EvidenceDescriptor, 0, 1)
+		for _, ev := range evidence {
+			if ev.Digest == *evidenceFlag {
+				filtered = append(filtered, ev)
+			}
+		}
+		if len(filtered) == 0 {
+			die(useJSON, errors.CodeMissingEvidence, fmt.Sprintf("check: digest %q not found in evidence for claim %q", *evidenceFlag, claimID))
+		}
+		evidence = filtered
+	}
 
 	if warn := checkDependencyDrift(root, checkerID); warn != "" {
 		fmt.Fprintln(os.Stderr, "warn:", warn)

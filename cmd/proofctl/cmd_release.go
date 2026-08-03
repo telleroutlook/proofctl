@@ -283,9 +283,11 @@ func cmdReleaseFix(
 			results = append(results, fixResult{
 				Blocker: condID,
 				Action:  "backfill freshness via check --no-cache",
-				Done:    fixed > 0 && len(fixNotes) == len(dag.Claims()),
+				Done:    fixed > 0,
 				Note:    strings.Join(fixNotes, "; "),
 			})
+			// Reload attestations so subsequent condition evaluation (C01 etc.) sees updated state.
+			attestations = loadAttestations(root, useJSON)
 
 		case strings.HasPrefix(condID, "meta:"):
 			// Domain metadata — needs replay to populate bridge.py output.

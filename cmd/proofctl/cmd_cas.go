@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -360,6 +361,7 @@ func cmdCasImportDir(args []string, useJSON bool) {
 func cmdCasGC(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("cas gc", flag.ContinueOnError)
 	dryRunFlag := fs.Bool("dry-run", false, "report what would be deleted without deleting")
+	yesFlag := fs.Bool("yes", false, "skip confirmation prompt and delete immediately")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
@@ -439,6 +441,19 @@ func cmdCasGC(args []string, useJSON bool) {
 	}
 
 	var freedBytes int64
+	if !*dryRunFlag && len(candidates) > 0 && !*yesFlag && !useJSON {
+		var totalSize int64
+		for _, c := range candidates {
+			totalSize += c.Size
+		}
+		fmt.Printf("cas gc: %d unreferenced blob(s) totalling %d bytes will be permanently deleted.\n", len(candidates), totalSize)
+		fmt.Print("Confirm deletion? [y/N] ")
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() || strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
+			fmt.Println("Aborted. Run with --yes to skip this prompt, or --dry-run to preview.")
+			return
+		}
+	}
 	for i := range candidates {
 		blobPath := filepath.Join(sha256Dir, candidates[i].Digest[7:9], candidates[i].Digest[9:])
 		if *dryRunFlag {
