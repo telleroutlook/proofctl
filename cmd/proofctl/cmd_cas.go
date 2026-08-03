@@ -12,6 +12,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/compile"
 	"github.com/telleroutlook/proofctl/internal/config"
 	errors "github.com/telleroutlook/proofctl/internal/errors"
+	"github.com/telleroutlook/proofctl/internal/ir"
 )
 
 func cmdCas(args []string, useJSON bool) {
@@ -96,9 +97,21 @@ func cmdCasImport(args []string, useJSON bool) {
 		}
 
 		// Update evidence size in graph if this digest matches.
+		// Re-verify SHA-256 when the recorded size was wrong, to catch corruption.
 		updated := false
 		if idx, ok := evidenceIdx[digest]; ok {
 			if pg.Evidence[idx].Size != size {
+				// Re-read the blob from CAS and verify its digest matches.
+				desc := ir.EvidenceDescriptor{Digest: digest, Size: size}
+				if verifyErr := store.Verify(desc); verifyErr != nil {
+					errMsg := fmt.Sprintf("size mismatch for %s and re-verification failed: %v", file, verifyErr)
+					if useJSON {
+						results = append(results, importResult{File: file, Digest: digest, Size: size, Error: errMsg})
+					} else {
+						fmt.Fprintf(os.Stderr, "cas import: %s\n", errMsg)
+					}
+					continue
+				}
 				pg.Evidence[idx].Size = size
 				graphModified = true
 				updated = true

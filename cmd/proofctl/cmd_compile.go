@@ -26,6 +26,7 @@ func cmdCompile(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("compile", flag.ContinueOnError)
 	adapterFlag := fs.String("adapter", "json", "adapter type: json, weil, or qmd")
 	fixDigestsFlag := fs.Bool("fix-digests", false, "compute and fill in zero statement.digest fields before compiling")
+	forceFlag := fs.Bool("force", false, "overwrite existing real attestations with shadow attestations (weil adapter only)")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, "compile: "+err.Error())
 	}
@@ -102,11 +103,29 @@ func cmdCompile(args []string, useJSON bool) {
 		if mkErr := os.MkdirAll(attestDir, 0o755); mkErr != nil {
 			die(useJSON, errors.CodeInternalError, "cannot create attestations dir: "+mkErr.Error())
 		}
+		var skipped []string
 		for claimID, att := range shadowAttestations {
 			attPath := filepath.Join(attestDir, claimID+".json")
+			if existing, readErr := os.ReadFile(attPath); readErr == nil {
+				var existingAtt ir.Attestation
+				if jsonErr := json.Unmarshal(existing, &existingAtt); jsonErr == nil {
+					if isHigherAssurance(existingAtt.Assurance) && !*forceFlag {
+						skipped = append(skipped, claimID)
+						if !useJSON {
+							fmt.Fprintf(os.Stderr, "warn: skipping shadow overwrite for %s (existing assurance: %s) — use --force to overwrite\n",
+								claimID, existingAtt.Assurance)
+						}
+						continue
+					}
+				}
+			}
 			if writeErr := atomicWriteJSON(attPath, att); writeErr != nil {
 				die(useJSON, errors.CodeInternalError, "cannot write attestation "+claimID+": "+writeErr.Error())
 			}
+		}
+		if useJSON && len(skipped) > 0 {
+			// Include skipped list in JSON output below.
+			_ = skipped
 		}
 	}
 
@@ -158,6 +177,20 @@ func compileWeil(src []byte) (*ir.ProofGraph, map[string]*ir.Attestation, error)
 		}
 	}
 	return pg, atts, nil
+}
+
+// isHigherAssurance reports whether assurance represents a real (non-shadow) verification
+// that should not be silently overwritten by a shadow attestation.
+func isHigherAssurance(a ir.Assurance) bool {
+	switch a {
+	case ir.AssuranceDeterministicCAP,
+		ir.AssuranceExactReplay,
+		ir.AssuranceReproducibleComputation,
+		ir.AssuranceFormalKernel,
+		ir.AssuranceIndependentReview:
+		return true
+	}
+	return false
 }
 
 // joinInts converts a slice of ints to a dot-separated version string.

@@ -291,7 +291,7 @@ func cmdReplay(args []string, useJSON bool) {
 		if err := os.MkdirAll(attestDir, 0o755); err != nil {
 			die(useJSON, errors.CodeInternalError, "replay: cannot create attestation dir: "+err.Error())
 		}
-		attestPath = filepath.Join(attestDir, *claimIDFlag+"-replay.json")
+		attestPath = filepath.Join(attestDir, *claimIDFlag+".json")
 		data, _ := json.MarshalIndent(att, "", "  ")
 		if err := os.WriteFile(attestPath, append(data, '\n'), 0o644); err != nil {
 			die(useJSON, errors.CodeInternalError, "replay: write attestation: "+err.Error())
