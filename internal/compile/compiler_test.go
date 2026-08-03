@@ -101,6 +101,40 @@ func TestCompile_MultipleClaims_WithDependency(t *testing.T) {
 	}
 }
 
+func TestCompile_CrossDomainDeps_Valid(t *testing.T) {
+	t.Parallel()
+	src := []byte(`{
+		"claims": [
+			{"id":"c1","kind":"lemma","statement":{"text":"t","digest":"sha256:aa"},"depends_on":[],"evidence":[],"checker_policy":"ck1","cross_domain_deps":["thm-external-claim"]}
+		],
+		"checkers": [{"id":"ck1","protocol_version":1}],
+		"evidence": []
+	}`)
+	pg, err := Compile(src, FormatJSON)
+	if err != nil {
+		t.Fatalf("expected no error for valid cross_domain_deps, got: %v", err)
+	}
+	if len(pg.Claims[0].CrossDomainDeps) != 1 || pg.Claims[0].CrossDomainDeps[0] != "thm-external-claim" {
+		t.Errorf("CrossDomainDeps not preserved: %v", pg.Claims[0].CrossDomainDeps)
+	}
+}
+
+func TestCompile_CrossDomainDeps_DuplicatesDependsOn_Error(t *testing.T) {
+	t.Parallel()
+	src := []byte(`{
+		"claims": [
+			{"id":"c2","kind":"lemma","statement":{"text":"t","digest":"sha256:bb"},"depends_on":[],"evidence":[],"checker_policy":"ck1"},
+			{"id":"c1","kind":"lemma","statement":{"text":"t","digest":"sha256:aa"},"depends_on":["c2"],"evidence":[],"checker_policy":"ck1","cross_domain_deps":["c2"]}
+		],
+		"checkers": [{"id":"ck1","protocol_version":1}],
+		"evidence": []
+	}`)
+	_, err := Compile(src, FormatJSON)
+	if err == nil {
+		t.Error("expected error when cross_domain_dep duplicates depends_on, got nil")
+	}
+}
+
 func TestCompile_BatchGroup_SameChecker_OK(t *testing.T) {
 	t.Parallel()
 	src := []byte(`{

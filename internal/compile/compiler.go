@@ -83,5 +83,22 @@ func validate(pg *ir.ProofGraph) error {
 			groupChecker[c.BatchGroup] = c.CheckerPolicy
 		}
 	}
+
+	// Validate cross_domain_deps: IDs must not duplicate depends_on entries
+	// (cross-domain deps are separate from intra-graph deps).
+	for _, c := range pg.Claims {
+		depsSet := make(map[string]bool, len(c.DependsOn))
+		for _, d := range c.DependsOn {
+			depsSet[d] = true
+		}
+		for _, xd := range c.CrossDomainDeps {
+			if xd == "" {
+				return fmt.Errorf("compile: claim %q has empty cross_domain_dep", c.ID)
+			}
+			if depsSet[xd] {
+				return fmt.Errorf("compile: claim %q: cross_domain_dep %q is already in depends_on; use one or the other", c.ID, xd)
+			}
+		}
+	}
 	return nil
 }

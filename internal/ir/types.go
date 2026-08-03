@@ -45,6 +45,10 @@ type Claim struct {
 	// a single batch checker invocation. All claims in the same group must share
 	// the same checker_policy.
 	BatchGroup string `json:"batch_group,omitempty"`
+	// CrossDomainDeps lists claim IDs from other domains whose attestations must
+	// already be accepted before this claim can be verified.
+	// Used when a Lean/Coq claim relies on a numerically-verified CAP claim.
+	CrossDomainDeps []string `json:"cross_domain_deps,omitempty"`
 }
 
 // Statement holds the human-readable text and its content-addressed digest.

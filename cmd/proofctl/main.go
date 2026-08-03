@@ -100,6 +100,8 @@ func main() {
 		cmdDoctor(subargs, *jsonFlag)
 	case "key":
 		cmdKey(subargs, *jsonFlag)
+	case "export":
+		cmdExport(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -132,6 +134,7 @@ Subcommands:
   snapshot  Write a point-in-time snapshot of claims + statuses
   doctor    Check that the proofctl environment is ready (PATH, project, checker, CAS)
   key       Manage signing keys (generate|list)
+  export    Export an accepted claim to a cross-domain format (--format lean)
   status    Print the current proof graph status
 
 Flags:

@@ -91,6 +91,73 @@ def _output(outcome: str, claim_id: str, metadata: dict, toolchain: dict = None)
     print(json.dumps(obj))
 
 
+def _check_cross_domain_imports(lake_root: str, attest_dir: str) -> str:
+    """
+    Scan lake_root for ProofCtlImport_*.lean files.
+    For each, parse the '-- Attestation digest: <digest>' comment and verify
+    that the matching attestation in attest_dir has the same self_digest.
+    Returns an error string if any mismatch is found, or "" if all match.
+    """
+    import glob
+    import re
+
+    pattern = os.path.join(lake_root, "**", "ProofCtlImport_*.lean")
+    import_files = glob.glob(pattern, recursive=True)
+
+    if not import_files:
+        return ""  # no cross-domain imports — nothing to verify
+
+    digest_re = re.compile(r"^--\s*Attestation digest:\s*(\S+)")
+    claim_re = re.compile(r"^--\s*Source claim:\s*(\S+)")
+
+    for import_file in import_files:
+        try:
+            with open(import_file, encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception as exc:
+            return f"cannot read {import_file}: {exc}"
+
+        expected_digest = ""
+        claim_id = ""
+        for line in lines[:20]:  # header is always in the first 20 lines
+            if m := digest_re.match(line):
+                expected_digest = m.group(1)
+            if m := claim_re.match(line):
+                claim_id = m.group(1)
+
+        if not expected_digest or not claim_id:
+            # Not a proofctl-generated import file — skip.
+            continue
+
+        # Find the matching attestation file.
+        att_path = os.path.join(attest_dir, claim_id + ".json")
+        if not os.path.isfile(att_path):
+            # Also try <claim-id>-replay.json.
+            att_path = os.path.join(attest_dir, claim_id + "-replay.json")
+
+        if not os.path.isfile(att_path):
+            return (
+                f"cross-domain claim mismatch: no attestation found for {claim_id!r}"
+                f" (expected from {os.path.basename(import_file)})"
+            )
+
+        try:
+            with open(att_path, encoding="utf-8") as f:
+                att = json.load(f)
+        except Exception as exc:
+            return f"cross-domain claim mismatch: cannot read attestation for {claim_id!r}: {exc}"
+
+        actual_digest = att.get("self_digest", "")
+        if actual_digest != expected_digest:
+            return (
+                f"cross-domain claim mismatch: {claim_id!r} — "
+                f"import file has digest {expected_digest!r} but "
+                f"attestation has {actual_digest!r}"
+            )
+
+    return ""
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         _output("error", "", {"error": "usage: bridge.py <cert-file>"})
@@ -123,6 +190,18 @@ def main() -> int:
     if code == -2:
         _output("error", claim_id, {"error": "lake not found in PATH"})
         return 2
+
+    # Check cross-domain claim integrity BEFORE lake build.
+    # ProofCtlImport_*.lean files must match the attestations in .proofctl/attestations/.
+    attest_dir = cert.get("attest_dir", os.path.join(lake_root, ".proofctl", "attestations"))
+    xd_error = _check_cross_domain_imports(lake_root, attest_dir)
+    if xd_error:
+        _output("rejected", claim_id, {
+            "lean_file": lean_file,
+            "theorem": theorem,
+            "error": xd_error,
+        })
+        return 1
 
     # Run lake build.
     code, stdout, stderr = _run(["lake", "build"], lake_root)

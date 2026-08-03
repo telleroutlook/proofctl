@@ -143,7 +143,7 @@ func (g *Gate) Release(
 	}
 
 	if r.pass {
-		snap := buildSnapshot(pol, attestations, evidence, asOf, buildClaimSummary(r.statuses))
+		snap := buildSnapshot(pol, attestations, evidence, asOf, buildClaimSummary(r.statuses), graph)
 		if err := g.writeSnapshot(snap); err != nil {
 			return false, r.blockers, fmt.Errorf("release: write snapshot: %w", err)
 		}
@@ -224,10 +224,11 @@ const SnapshotFile = "release-snapshot.json"
 // ReleaseSnapshot is a human- and machine-readable summary of a successful release.
 // It contains enough information to replace a hand-maintained STATUS.json.
 type ReleaseSnapshot struct {
-	ReleaseTarget string                  `json:"release_target"`
-	Generated     string                  `json:"generated"`
-	ClaimSummary  *ClaimSummary           `json:"claim_summary"`
-	Evidence      []SnapshotEvidenceEntry `json:"evidence"`
+	ReleaseTarget   string                  `json:"release_target"`
+	Generated       string                  `json:"generated"`
+	ClaimSummary    *ClaimSummary           `json:"claim_summary"`
+	Evidence        []SnapshotEvidenceEntry `json:"evidence"`
+	CrossDomainDeps []string                `json:"cross_domain_deps,omitempty"` // union of all claim cross_domain_deps
 }
 
 // SnapshotEvidenceEntry records per-certificate metadata from checker attestations.
@@ -245,6 +246,7 @@ func buildSnapshot(
 	evidence []ir.EvidenceDescriptor,
 	asOf string,
 	summary *ClaimSummary,
+	graph *dag.DAG,
 ) ReleaseSnapshot {
 	// Build a per-digest metadata index from all attestations.
 	// Later attestations for the same digest overwrite earlier ones (last writer wins).
@@ -275,11 +277,26 @@ func buildSnapshot(
 		entries = append(entries, e)
 	}
 
+	// Collect all cross_domain_deps across all claims.
+	var crossDeps []string
+	if graph != nil {
+		seen := map[string]bool{}
+		for _, c := range graph.Claims() {
+			for _, xd := range c.CrossDomainDeps {
+				if !seen[xd] {
+					seen[xd] = true
+					crossDeps = append(crossDeps, xd)
+				}
+			}
+		}
+	}
+
 	return ReleaseSnapshot{
-		ReleaseTarget: pol.Target,
-		Generated:     asOf,
-		ClaimSummary:  summary,
-		Evidence:      entries,
+		ReleaseTarget:   pol.Target,
+		Generated:       asOf,
+		ClaimSummary:    summary,
+		Evidence:        entries,
+		CrossDomainDeps: crossDeps,
 	}
 }
 
