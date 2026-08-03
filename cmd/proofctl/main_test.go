@@ -242,3 +242,77 @@ func TestGraph_NoProject(t *testing.T) {
 		t.Error("proofctl graph outside project: expected non-zero exit")
 	}
 }
+
+// writeMinimalGraph writes a graph.json with one checker to dir and
+// runs proofctl init + compile --fix-digests so .proofctl/graph.json exists.
+func writeMinimalGraph(t *testing.T, bin, dir, script string) {
+	t.Helper()
+	zeroDigest := strings.Repeat("0", 64)
+	graph := `{
+  "claims": [{"id":"c1","kind":"lemma","statement":{"text":"t","digest":"sha256:` + zeroDigest + `"},"depends_on":[],"evidence":[],"checker_policy":"ck1"}],
+  "checkers": [{"id":"ck1","protocol_version":1,"checker_digest":"sha256:` + zeroDigest + `","runtime":{"kind":"native"}}],
+  "evidence": []
+}`
+	if err := os.WriteFile(filepath.Join(dir, "graph.json"), []byte(graph), 0o644); err != nil {
+		t.Fatalf("write graph.json: %v", err)
+	}
+	run(t, bin, dir, "init")
+	run(t, bin, dir, "compile", "--fix-digests", "graph.json")
+}
+
+// TestPinChecker_NoLock verifies that 'proofctl pin checker' without --lock
+// prints a warning about unpinned dependencies.
+func TestPinChecker_NoLock(t *testing.T) {
+	t.Parallel()
+	bin := buildBinary(t)
+	dir := t.TempDir()
+
+	script := filepath.Join(dir, "check.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	writeMinimalGraph(t, bin, dir, script)
+
+	stdout, stderr, _ := run(t, bin, dir, "pin", "checker", "--cmd", "sh "+script)
+	combined := stdout + stderr
+	if !strings.Contains(combined, "warn") && !strings.Contains(combined, "not pinned") {
+		t.Errorf("expected dependency-not-pinned warning, got stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+// TestPinChecker_WithLock verifies that --lock pins both script and lockfile digests.
+func TestPinChecker_WithLock(t *testing.T) {
+	t.Parallel()
+	bin := buildBinary(t)
+	dir := t.TempDir()
+
+	script := filepath.Join(dir, "check.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	lockfile := filepath.Join(dir, "requirements.txt")
+	if err := os.WriteFile(lockfile, []byte("numpy==1.26.0\n"), 0o644); err != nil {
+		t.Fatalf("write requirements.txt: %v", err)
+	}
+	writeMinimalGraph(t, bin, dir, script)
+
+	_, stderr, code := run(t, bin, dir, "pin", "checker",
+		"--cmd", "sh "+script,
+		"--lock", lockfile,
+	)
+	if code != 0 {
+		t.Fatalf("pin checker --lock: expected exit 0, got %d, stderr=%q", code, stderr)
+	}
+	if strings.Contains(stderr, "warn") {
+		t.Errorf("unexpected warning when --lock provided: %q", stderr)
+	}
+
+	// The graph source should now contain dependency_manifest_digest.
+	data, err := os.ReadFile(filepath.Join(dir, "graph.json"))
+	if err != nil {
+		t.Fatalf("read graph.json: %v", err)
+	}
+	if !strings.Contains(string(data), "dependency_manifest_digest") {
+		t.Error("graph.json should contain dependency_manifest_digest after pin --lock")
+	}
+}

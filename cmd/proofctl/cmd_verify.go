@@ -86,6 +86,10 @@ func cmdVerify(args []string, useJSON bool) {
 			return verifyResult{ClaimID: claimID, Outcome: "error", Error: "no checker for policy " + claim.CheckerPolicy}
 		}
 		evidence := findEvidence(pg, claim.Evidence)
+		// Warn on dependency manifest drift before running the checker.
+		if warn := checkDependencyDrift(root, checkerID); warn != "" {
+			fmt.Fprintln(os.Stderr, "warn:", warn)
+		}
 		res, runErr := pipe.Run(context.Background(), claimID, checkerID, evidence, "")
 		if runErr != nil {
 			return verifyResult{ClaimID: claimID, Outcome: "error", Error: runErr.Error()}
@@ -217,4 +221,28 @@ func findEvidence(pg *ir.ProofGraph, refs []string) []ir.EvidenceDescriptor {
 		}
 	}
 	return out
+}
+
+// checkDependencyDrift returns a non-empty warning string if the checker's
+// pinned dependency manifest digest does not match the current file on disk.
+// Returns "" if no manifest was pinned or the digest matches.
+func checkDependencyDrift(projectRoot string, checkerID ir.CheckerIdentity) string {
+	pinned := checkerID.Runtime.DependencyManifestDigest
+	relPath := checkerID.Runtime.DependencyManifestPath
+	if pinned == "" || relPath == "" {
+		return ""
+	}
+	absPath := relPath
+	if !filepath.IsAbs(relPath) {
+		absPath = filepath.Join(projectRoot, relPath)
+	}
+	current, err := hashFile(absPath)
+	if err != nil {
+		return fmt.Sprintf("dependency-drift: cannot hash %s: %v", relPath, err)
+	}
+	if current != pinned {
+		return fmt.Sprintf("dependency-drift: %s has changed since pinning (pinned=%s current=%s) — run 'proofctl pin checker --lock %s' to update",
+			relPath, pinned[:16]+"…", current[:16]+"…", relPath)
+	}
+	return ""
 }

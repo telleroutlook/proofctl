@@ -69,9 +69,11 @@ type CheckerIdentity struct {
 
 // Runtime describes how a checker is executed.
 type Runtime struct {
-	Kind   string   `json:"kind"`          // "oci" | "native" | "wasi"
-	Cmd    []string `json:"cmd,omitempty"` // for "native": [interpreter, script, args...]
-	Digest string   `json:"digest,omitempty"`
+	Kind                     string   `json:"kind"`          // "oci" | "native" | "wasi"
+	Cmd                      []string `json:"cmd,omitempty"` // for "native": [interpreter, script, args...]
+	Digest                   string   `json:"digest,omitempty"`
+	DependencyManifestDigest string   `json:"dependency_manifest_digest,omitempty"` // sha256 of lockfile (requirements.txt, go.sum, etc.)
+	DependencyManifestPath   string   `json:"dependency_manifest_path,omitempty"`   // relative path to lockfile from project root
 }
 
 // Status values for a claim.

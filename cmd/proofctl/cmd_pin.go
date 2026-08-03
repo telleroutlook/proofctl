@@ -18,7 +18,7 @@ import (
 
 func cmdPin(args []string, useJSON bool) {
 	if len(args) == 0 || args[0] != "checker" {
-		die(useJSON, errors.CodeInvalidInput, "usage: proofctl pin checker --cmd <command> [--id <checker-id>]")
+		die(useJSON, errors.CodeInvalidInput, "usage: proofctl pin checker --cmd <command> [--id <checker-id>] [--lock <lockfile>]")
 	}
 	cmdPinChecker(args[1:], useJSON)
 }
@@ -27,6 +27,7 @@ func cmdPinChecker(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("pin checker", flag.ContinueOnError)
 	cmdFlag := fs.String("cmd", "", `checker command, e.g. "python3 adapters/cap/bridge.py"`)
 	idFlag := fs.String("id", "", "checker ID in graph.json to update (default: first checker)")
+	lockFlag := fs.String("lock", "", "dependency lockfile to pin (e.g. requirements.txt, go.sum, uv.lock)")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
@@ -69,6 +70,21 @@ func cmdPinChecker(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInternalError, "pin checker: hash script: "+err.Error())
 	}
 
+	// Hash lockfile if provided.
+	var lockDigest, lockRelPath string
+	if *lockFlag != "" {
+		lockDigest, err = hashFile(*lockFlag)
+		if err != nil {
+			die(useJSON, errors.CodeInternalError, "pin checker: hash lockfile: "+err.Error())
+		}
+		// Store path relative to project root when possible.
+		if rel, relErr := filepath.Rel(root, *lockFlag); relErr == nil && !strings.HasPrefix(rel, "..") {
+			lockRelPath = rel
+		} else {
+			lockRelPath = *lockFlag
+		}
+	}
+
 	// Update matching checker in the ProofGraph.
 	updated := false
 	for i, ch := range pg.Checkers {
@@ -77,8 +93,10 @@ func cmdPinChecker(args []string, useJSON bool) {
 		}
 		pg.Checkers[i].CheckerDigest = digest
 		pg.Checkers[i].Runtime = ir.Runtime{
-			Kind: "native",
-			Cmd:  cmdParts,
+			Kind:                     "native",
+			Cmd:                      cmdParts,
+			DependencyManifestDigest: lockDigest,
+			DependencyManifestPath:   lockRelPath,
 		}
 		updated = true
 		break
@@ -100,18 +118,33 @@ func cmdPinChecker(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInternalError, "pin checker: write compiled graph: "+err.Error())
 	}
 
+	// Warn if no lockfile was pinned.
+	if lockDigest == "" && !useJSON {
+		fmt.Fprintln(os.Stderr, "warn: checker dependencies not pinned — run 'proofctl pin checker --lock <lockfile>' to pin dependency manifest")
+	}
+
 	if useJSON {
-		enc := json.NewEncoder(os.Stdout)
-		_ = enc.Encode(map[string]string{
+		out := map[string]string{
 			"checker_id":     targetID,
 			"checker_digest": digest,
 			"cmd":            *cmdFlag,
 			"updated":        srcPath,
-		})
+		}
+		if lockDigest != "" {
+			out["dependency_manifest_digest"] = lockDigest
+			out["dependency_manifest_path"] = lockRelPath
+		} else {
+			out["warn"] = "checker dependencies not pinned — run with --lock <lockfile>"
+		}
+		enc := json.NewEncoder(os.Stdout)
+		_ = enc.Encode(out)
 	} else {
 		fmt.Printf("Pinned checker %q\n", targetID)
 		fmt.Printf("  digest: %s\n", digest)
 		fmt.Printf("  cmd:    %s\n", *cmdFlag)
+		if lockDigest != "" {
+			fmt.Printf("  lock:   %s (%s)\n", lockRelPath, lockDigest)
+		}
 		fmt.Printf("  written to %s\n", srcPath)
 	}
 }
