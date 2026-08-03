@@ -182,15 +182,7 @@ func compileWeil(src []byte) (*ir.ProofGraph, map[string]*ir.Attestation, error)
 // isHigherAssurance reports whether assurance represents a real (non-shadow) verification
 // that should not be silently overwritten by a shadow attestation.
 func isHigherAssurance(a ir.Assurance) bool {
-	switch a {
-	case ir.AssuranceDeterministicCAP,
-		ir.AssuranceExactReplay,
-		ir.AssuranceReproducibleComputation,
-		ir.AssuranceFormalKernel,
-		ir.AssuranceIndependentReview:
-		return true
-	}
-	return false
+	return ir.AssuranceLevel(a) > 0
 }
 
 // joinInts converts a slice of ints to a dot-separated version string.

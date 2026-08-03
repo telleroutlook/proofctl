@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/telleroutlook/proofctl/internal/config"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/status"
 )
@@ -18,8 +20,18 @@ const zeroDigestPrefix = "sha256:00000000000000000000000000000000000000000000000
 func cmdStatus(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	verboseFlag := fs.Bool("verbose", false, "show toolchain info for accepted claims")
+	watchFlag := fs.Bool("watch", false, "re-print status whenever .proofctl/ or graph source changes (poll every 2s)")
 	_ = fs.Parse(args)
 
+	if *watchFlag {
+		cmdStatusWatch(*verboseFlag, useJSON)
+		return
+	}
+
+	printStatus(*verboseFlag, useJSON)
+}
+
+func printStatus(verbose, useJSON bool) {
 	root, cfg, g, attestations := loadProjectGraph(useJSON)
 
 	// Load policy to resolve release_target (best-effort; nil if no policy configured).
@@ -130,7 +142,7 @@ func cmdStatus(args []string, useJSON bool) {
 			unverifiedMark = " [UNVERIFIED_DIGEST]"
 		}
 		fmt.Printf("%-40s %-10s%s%s\n", id, strings.ToUpper(string(s)), unverifiedMark, annotation)
-		if *verboseFlag && s == ir.StatusAccepted {
+		if verbose && s == ir.StatusAccepted {
 			if att, ok := attestations[id]; ok && len(att.Toolchain) > 0 {
 				keys := make([]string, 0, len(att.Toolchain))
 				for k := range att.Toolchain {
@@ -215,4 +227,64 @@ func loadReleaseTargetFromPolicy(root, policyFile string) *string {
 		return nil
 	}
 	return &pol.Target
+}
+
+// cmdStatusWatch polls .proofctl/ and the graph source every 2 seconds and
+// re-prints status whenever the directory mtime changes.
+func cmdStatusWatch(verbose, useJSON bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "watch: cannot determine working directory:", err)
+		os.Exit(1)
+	}
+	root, cfgErr := findProjectRoot(cwd)
+	if cfgErr != nil {
+		fmt.Fprintln(os.Stderr, "watch: no .proofctl found")
+		os.Exit(1)
+	}
+
+	proofctlDir := filepath.Join(root, config.DirName)
+	watched := []string{
+		proofctlDir,
+		filepath.Join(proofctlDir, config.AttestDir),
+	}
+
+	// Try to add the graph source file.
+	if cfg, loadErr := config.Load(root); loadErr == nil && cfg.GraphSource != "" {
+		watched = append(watched, filepath.Join(root, cfg.GraphSource))
+	}
+
+	lastSig := watchSignature(watched)
+
+	if !useJSON {
+		fmt.Fprintf(os.Stderr, "Watching for changes (Ctrl-C to stop)...\n\n")
+	}
+	printStatus(verbose, useJSON)
+
+	for {
+		time.Sleep(2 * time.Second)
+		sig := watchSignature(watched)
+		if sig != lastSig {
+			lastSig = sig
+			if !useJSON {
+				fmt.Println("\n--- refresh ---")
+			}
+			printStatus(verbose, useJSON)
+		}
+	}
+}
+
+// watchSignature returns a string encoding the combined mtime+size of all
+// watched paths. A change in this string means something relevant changed.
+func watchSignature(paths []string) string {
+	var sb strings.Builder
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			sb.WriteString(p + ":err\n")
+			continue
+		}
+		fmt.Fprintf(&sb, "%s:%d:%d\n", p, info.ModTime().UnixNano(), info.Size())
+	}
+	return sb.String()
 }

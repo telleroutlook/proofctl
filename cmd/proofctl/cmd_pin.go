@@ -126,7 +126,11 @@ func cmdPinChecker(args []string, useJSON bool) {
 
 	// Warn if no lockfile was pinned.
 	if lockDigest == "" && !useJSON {
-		fmt.Fprintln(os.Stderr, "warn: checker dependencies not pinned — run 'proofctl pin checker --lock <lockfile>' to pin dependency manifest")
+		fmt.Fprintln(os.Stderr, "warn: checker dependencies not pinned")
+		fmt.Fprintln(os.Stderr, "  To pin, rerun with --lock pointing to your dependency manifest:")
+		fmt.Fprintln(os.Stderr, "    requirements.txt   proofctl pin checker --cmd ... --lock requirements.txt")
+		fmt.Fprintln(os.Stderr, "    uv.lock            proofctl pin checker --cmd ... --lock uv.lock")
+		fmt.Fprintln(os.Stderr, "    go.sum             proofctl pin checker --cmd ... --lock go.sum")
 	}
 
 	if useJSON {
@@ -140,7 +144,7 @@ func cmdPinChecker(args []string, useJSON bool) {
 			out["dependency_manifest_digest"] = lockDigest
 			out["dependency_manifest_path"] = lockRelPath
 		} else {
-			out["warn"] = "checker dependencies not pinned — run with --lock <lockfile>"
+			out["warn"] = "checker dependencies not pinned — rerun with --lock <manifest>; accepted formats: requirements.txt, uv.lock, go.sum"
 		}
 		enc := json.NewEncoder(os.Stdout)
 		_ = enc.Encode(out)

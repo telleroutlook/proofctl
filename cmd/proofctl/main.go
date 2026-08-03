@@ -124,24 +124,24 @@ Subcommands:
   init      Initialize a new proof graph project (--domain cap|lrat|qmd)
   domains   List known domains (domains list)
   compile   Compile a proof source file to ProofGraph IR
-  check     Run checker against CAS evidence for a claim (no generator)
+  check     Run checker against CAS evidence for a claim (--all | --no-cache)
   verify    Verify attestation integrity
-  attest    Record a manual or external-tool attestation for a claim
+  attest    Record a manual attestation (--batch, diff, --force, --key)
   explain   Explain the status of a claim
-  graph     Print the claim dependency graph
+  graph     Print the claim dependency graph (--dot, --mermaid)
   frontier  List unresolved direct dependencies of a claim
   impact    List claims that depend on a given claim
-  cache     Manage the checker result cache
-  cas       Manage the content-addressed store (import|list)
+  cache     Manage the checker result cache (audit|invalidate|show-key)
+  cas       Manage the content-addressed store (import|import-dir|list)
   pin       Pin a checker binary digest and command (pin checker --cmd ...)
-  env       Manage checker runtime environment (verify|snapshot)
+  env       Manage checker runtime environment (verify|snapshot --force)
   replay    Cold-start generator+checker replay for a claim
-  release   Run the release gate
+  release   Run the release gate (--dry-run)
   snapshot  Write a point-in-time snapshot of claims + statuses
   doctor    Check that the proofctl environment is ready (PATH, project, checker, CAS)
   key       Manage signing keys (generate|list)
   export    Export an accepted claim to a cross-domain format (--format lean)
-  status    Print the current proof graph status
+  status    Print the current proof graph status (--watch)
 
 Flags:
   --json      Output in JSON format

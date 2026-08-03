@@ -57,3 +57,36 @@ First tagged release. Covers Milestones 1–7 of the platform roadmap.
 - CI: bridge.py sync check, daily fuzz job, race detector
 
 [v0.1.0]: https://github.com/telleroutlook/proofctl/releases/tag/v0.1.0
+
+---
+
+## [v0.2.3] — 2026-08-03
+
+### Added
+
+- `proofctl env snapshot --force` — prevents silently overwriting an existing lock file (B4)
+- `proofctl attest --assurance independent-review` now requires `--key <keyfile>` or `PROOFCTL_SIGNING_KEY`; self-declaration without a verifiable identity is rejected (B5/F6)
+- `proofctl cache invalidate <claim>` — removes cached attestation to force re-run on next check (B6)
+- `proofctl cache show-key <claim>` — prints the cache key and explains what inputs compose it (B6)
+- `proofctl check --no-cache` — skips cache lookup and re-runs checker unconditionally (B6)
+- `proofctl check --all` — runs checkers for all claims with a `checker_policy`, outputs pytest-style summary (E4)
+- `proofctl attest --batch <manifest.json>` — attests multiple claims from a JSON array in one invocation (E3)
+- `proofctl attest diff <claim>` — shows field-level diff between current and previous attestation (git-backed) (F7)
+- `proofctl cas import-dir <dir> [--pattern <glob>]` — bulk-imports files matching a glob pattern (F5)
+- `proofctl status --watch` — polls `.proofctl/` every 2 s and re-prints status on any change (E7)
+- `ir.AssuranceLevel()` — exported assurance rank function; replaces the ad-hoc `isHigherAssurance` boolean in compile (E5)
+- `proofctl attest` now blocks assurance downgrades (`deterministic-cap` → `shadow-review`) unless `--force` is given (E5)
+- `proofctl pin checker` warning now lists accepted lockfile formats with examples (B7)
+
+### Changed
+
+- `proofctl check` cache-hit annotation now shows the key prefix and how to invalidate it
+
+### Fixed
+
+- `isHigherAssurance` in `cmd_compile.go` delegated to `ir.AssuranceLevel` — single source of truth for assurance ordering
+
+[v0.2.3]: https://github.com/telleroutlook/proofctl/releases/tag/v0.2.3
+[v0.2.2]: https://github.com/telleroutlook/proofctl/releases/tag/v0.2.2
+[v0.2.1]: https://github.com/telleroutlook/proofctl/releases/tag/v0.2.1
+[v0.2.0]: https://github.com/telleroutlook/proofctl/releases/tag/v0.2.0

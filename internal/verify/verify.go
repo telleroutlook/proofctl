@@ -30,6 +30,7 @@ type Pipeline struct {
 	Runner     runner.Runner
 	SigningKey *signing.Key // optional; if set, attestations are signed on write
 	TrustStore string       // directory of *.pub key files; used to verify loaded attestations
+	NoCache    bool         // if true, skip cache lookup and always re-run checker
 }
 
 // Result is returned by Pipeline.Run.
@@ -90,13 +91,15 @@ func (p *Pipeline) Run(
 	cacheKey := checker.CacheKey(claim, deps, evidence, checkerID, checkerID.SchemaDigest, policyDigest)
 
 	// 4. Check attestation cache.
-	if hit, err := p.loadCachedAttestation(claimID, cacheKey); err == nil && hit != nil {
-		return &Result{Attestation: hit, CacheHit: true, CacheKey: cacheKey}, nil
-	} else if err != nil && isSigInvalidError(err) {
-		// Signature verification failed on the cached attestation — surface the error
-		// rather than silently re-running the checker, which would mask tampering.
-		return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
-			"claim %q: cached attestation signature invalid: %v", claimID, err)
+	if !p.NoCache {
+		if hit, err := p.loadCachedAttestation(claimID, cacheKey); err == nil && hit != nil {
+			return &Result{Attestation: hit, CacheHit: true, CacheKey: cacheKey}, nil
+		} else if err != nil && isSigInvalidError(err) {
+			// Signature verification failed on the cached attestation — surface the error
+			// rather than silently re-running the checker, which would mask tampering.
+			return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
+				"claim %q: cached attestation signature invalid: %v", claimID, err)
+		}
 	}
 
 	// 5. Pre-run freshness snapshot.

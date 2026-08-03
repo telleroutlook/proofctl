@@ -385,3 +385,8 @@ func loadSigningKeyIfSet() *signing.Key {
 	}
 	return k
 }
+
+// loadSigningKeyFromPath loads a private signing key from an explicit path.
+func loadSigningKeyFromPath(path string) (*signing.Key, error) {
+	return signing.LoadPrivate(path)
+}

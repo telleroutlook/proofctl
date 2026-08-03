@@ -111,6 +111,28 @@ const (
 	AssuranceAssumption              Assurance = "assumption"
 )
 
+// AssuranceLevel returns the ordinal rank of an assurance type, where higher
+// numbers mean stronger evidence. Returns 0 for unknown types (treated as lowest).
+// Used to detect downgrade attempts when overwriting an attestation.
+func AssuranceLevel(a Assurance) int {
+	switch a {
+	case AssuranceFormalKernel:
+		return 6
+	case AssuranceDeterministicCAP:
+		return 5
+	case AssuranceExactReplay:
+		return 4
+	case AssuranceReproducibleComputation:
+		return 3
+	case AssuranceIndependentReview:
+		return 2
+	case AssuranceAIReview:
+		return 1
+	default:
+		return 0
+	}
+}
+
 // Attestation records a single local verification decision.
 type Attestation struct {
 	ClaimID           string               `json:"claim_id"`

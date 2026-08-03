@@ -127,8 +127,16 @@ func cmdEnvSnapshot(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("env snapshot", flag.ContinueOnError)
 	checkerFlag := fs.String("checker", "python3", "checker interpreter (e.g. python3)")
 	outFlag := fs.String("out", "environment.lock", "output lock file path")
+	forceFlag := fs.Bool("force", false, "overwrite existing lock file without prompting")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
+	}
+
+	if !*forceFlag {
+		if _, err := os.Stat(*outFlag); err == nil {
+			die(useJSON, errors.CodeInvalidInput, fmt.Sprintf(
+				"env snapshot: %s already exists — use --force to overwrite", *outFlag))
+		}
 	}
 
 	lock := envLock{
