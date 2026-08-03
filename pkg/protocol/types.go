@@ -56,6 +56,11 @@ type CheckerOutput struct {
 	// Metadata is an optional map of domain-specific key-value pairs that are
 	// stored in the attestation. Used by release conditions (required_metadata_keys).
 	Metadata map[string]string `json:"metadata,omitempty"`
+	// Toolchain records the tool versions used during verification.
+	// Keys are tool-specific (e.g. "lean_version", "mathlib_commit", "lake_version").
+	// proofctl hashes this map and includes it in the cache key so that
+	// a toolchain change forces re-verification even when all inputs are identical.
+	Toolchain map[string]string `json:"toolchain,omitempty"`
 	// Resources reports resource consumption.
 	Resources ResourceUsage `json:"resources"`
 }

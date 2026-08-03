@@ -226,3 +226,56 @@ func TestCacheKeyEmptyDepsEvidence(t *testing.T) {
 		t.Errorf("expected 64-char key for empty slices, got %d: %q", len(k2), k2)
 	}
 }
+
+// TestCacheKeyWithToolchain_DiffersFromWithout verifies that a toolchain map
+// produces a different cache key than no toolchain.
+func TestCacheKeyWithToolchain_DiffersFromWithout(t *testing.T) {
+	t.Parallel()
+	claim := &ir.Claim{ID: "c1", Kind: "lemma", Statement: ir.Statement{Digest: "sha256:aa"}}
+	checker := ir.CheckerIdentity{ID: "ck1", ProtocolVersion: 1}
+
+	k1 := CacheKey(claim, nil, nil, checker, "", "")
+	k2 := CacheKeyWithToolchain(claim, nil, nil, checker, "", "", map[string]string{
+		"lean_version": "4.14.0",
+	})
+	if k1 == k2 {
+		t.Error("CacheKeyWithToolchain should differ from CacheKey when toolchain is non-empty")
+	}
+}
+
+// TestCacheKeyWithToolchain_DiffersOnToolchainChange verifies that a different
+// toolchain produces a different cache key.
+func TestCacheKeyWithToolchain_DiffersOnToolchainChange(t *testing.T) {
+	t.Parallel()
+	claim := &ir.Claim{ID: "c1", Kind: "lemma", Statement: ir.Statement{Digest: "sha256:aa"}}
+	checker := ir.CheckerIdentity{ID: "ck1", ProtocolVersion: 1}
+
+	k1 := CacheKeyWithToolchain(claim, nil, nil, checker, "", "", map[string]string{
+		"lean_version": "4.14.0",
+	})
+	k2 := CacheKeyWithToolchain(claim, nil, nil, checker, "", "", map[string]string{
+		"lean_version": "4.15.0",
+	})
+	if k1 == k2 {
+		t.Error("different toolchain versions should produce different cache keys")
+	}
+}
+
+// TestCacheKeyWithToolchain_NilEqualsEmpty verifies that nil and empty toolchain
+// produce the same cache key as CacheKey.
+func TestCacheKeyWithToolchain_NilEqualsEmpty(t *testing.T) {
+	t.Parallel()
+	claim := &ir.Claim{ID: "c1", Kind: "lemma", Statement: ir.Statement{Digest: "sha256:aa"}}
+	checker := ir.CheckerIdentity{ID: "ck1", ProtocolVersion: 1}
+
+	kBase := CacheKey(claim, nil, nil, checker, "", "")
+	kNil := CacheKeyWithToolchain(claim, nil, nil, checker, "", "", nil)
+	kEmpty := CacheKeyWithToolchain(claim, nil, nil, checker, "", "", map[string]string{})
+
+	if kBase != kNil {
+		t.Error("CacheKeyWithToolchain(nil) should equal CacheKey")
+	}
+	if kBase != kEmpty {
+		t.Error("CacheKeyWithToolchain(empty map) should equal CacheKey")
+	}
+}

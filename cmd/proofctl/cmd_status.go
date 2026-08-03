@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -11,7 +12,11 @@ import (
 	"github.com/telleroutlook/proofctl/internal/status"
 )
 
-func cmdStatus(_ []string, useJSON bool) {
+func cmdStatus(args []string, useJSON bool) {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	verboseFlag := fs.Bool("verbose", false, "show toolchain info for accepted claims")
+	_ = fs.Parse(args)
+
 	_, _, g, attestations := loadProjectGraph(useJSON)
 
 	statuses := status.Compute(g, attestations)
@@ -91,6 +96,18 @@ func cmdStatus(_ []string, useJSON bool) {
 			reason = "  (no attestation)"
 		}
 		fmt.Printf("%-40s %-10s%s\n", id, strings.ToUpper(string(s)), reason)
+		if *verboseFlag && s == ir.StatusAccepted {
+			if att, ok := attestations[id]; ok && len(att.Toolchain) > 0 {
+				keys := make([]string, 0, len(att.Toolchain))
+				for k := range att.Toolchain {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					fmt.Printf("  %-38s %s=%s\n", "", k, att.Toolchain[k])
+				}
+			}
+		}
 	}
 	fmt.Printf("\nSummary: %d accepted, %d blocked, %d open, %d rejected\n",
 		accepted, blocked, open, rejected)

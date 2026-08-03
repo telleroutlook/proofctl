@@ -214,6 +214,12 @@ func (p *Pipeline) Run(
 		if len(checkerOut.Metadata) > 0 {
 			att.Metadata = checkerOut.Metadata
 		}
+		if len(checkerOut.Toolchain) > 0 {
+			att.Toolchain = checkerOut.Toolchain
+			// Recompute cache key to include toolchain digest, so a toolchain
+			// change causes a cache miss on the next verify run.
+			att.CacheKey = checker.CacheKeyWithToolchain(claim, deps, evidence, checkerID, checkerID.SchemaDigest, policyDigest, checkerOut.Toolchain)
+		}
 	}
 
 	// Compute self-digest (zero out field first).

@@ -248,6 +248,7 @@ func buildSnapshot(
 ) ReleaseSnapshot {
 	// Build a per-digest metadata index from all attestations.
 	// Later attestations for the same digest overwrite earlier ones (last writer wins).
+	// Toolchain fields are merged into metadata with a "toolchain." prefix.
 	digestMeta := make(map[string]map[string]string)
 	for _, att := range attestations {
 		for _, ev := range att.Evidence {
@@ -256,6 +257,9 @@ func buildSnapshot(
 			}
 			for k, v := range att.Metadata {
 				digestMeta[ev.Digest][k] = v
+			}
+			for k, v := range att.Toolchain {
+				digestMeta[ev.Digest]["toolchain."+k] = v
 			}
 		}
 	}

@@ -22,6 +22,10 @@ type cacheKeyInput struct {
 	Checker           ir.CheckerIdentity      `json:"checker"`
 	SchemaDigest      string                  `json:"schema_digest"`
 	PolicyDigest      string                  `json:"policy_digest"`
+	// ToolchainDigest is the SHA256 of the checker's reported toolchain map.
+	// Non-empty only when the checker output included a "toolchain" field.
+	// A toolchain change produces a different cache key, forcing re-verification.
+	ToolchainDigest string `json:"toolchain_digest,omitempty"`
 }
 
 // CacheKey computes a deterministic SHA256 cache key over all inputs to a checker
@@ -36,11 +40,44 @@ func CacheKey(
 	schemaDigest string,
 	policyDigest string,
 ) string {
+	return cacheKeyWithToolchain(claim, deps, evidence, checker, schemaDigest, policyDigest, nil)
+}
+
+// CacheKeyWithToolchain is like CacheKey but also hashes the toolchain map.
+// Use this when re-computing the cache key after a checker run that reported toolchain info.
+func CacheKeyWithToolchain(
+	claim *ir.Claim,
+	deps []*ir.Claim,
+	evidence []ir.EvidenceDescriptor,
+	checker ir.CheckerIdentity,
+	schemaDigest string,
+	policyDigest string,
+	toolchain map[string]string,
+) string {
+	return cacheKeyWithToolchain(claim, deps, evidence, checker, schemaDigest, policyDigest, toolchain)
+}
+
+func cacheKeyWithToolchain(
+	claim *ir.Claim,
+	deps []*ir.Claim,
+	evidence []ir.EvidenceDescriptor,
+	checker ir.CheckerIdentity,
+	schemaDigest string,
+	policyDigest string,
+	toolchain map[string]string,
+) string {
 	depIDs := make([]string, len(deps))
 	depDigests := make([]string, len(deps))
 	for i, d := range deps {
 		depIDs[i] = d.ID
 		depDigests[i] = d.Statement.Digest
+	}
+
+	var toolchainDigest string
+	if len(toolchain) > 0 {
+		tcData, _ := json.Marshal(toolchain)
+		sum := sha256.Sum256(tcData)
+		toolchainDigest = fmt.Sprintf("%x", sum)
 	}
 
 	input := cacheKeyInput{
@@ -53,11 +90,11 @@ func CacheKey(
 		Checker:           checker,
 		SchemaDigest:      schemaDigest,
 		PolicyDigest:      policyDigest,
+		ToolchainDigest:   toolchainDigest,
 	}
 
 	data, err := json.Marshal(input)
 	if err != nil {
-		// json.Marshal on a plain struct should never fail.
 		panic(fmt.Sprintf("checker: cache key marshal: %v", err))
 	}
 	sum := sha256.Sum256(data)

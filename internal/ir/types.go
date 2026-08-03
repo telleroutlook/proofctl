@@ -124,7 +124,10 @@ type Attestation struct {
 	SelfDigest        string               `json:"self_digest"`
 	CacheKey          string               `json:"cache_key,omitempty"`
 	Metadata          map[string]string    `json:"metadata,omitempty"`
-	Signature         *AttestationSig      `json:"signature,omitempty"`
+	// Toolchain records the checker's tool version map, populated from
+	// CheckerOutput.Toolchain. Stored for auditing and status --verbose display.
+	Toolchain map[string]string `json:"toolchain,omitempty"`
+	Signature *AttestationSig   `json:"signature,omitempty"`
 }
 
 // AttestationSig is the optional Ed25519 signature embedded in an attestation.
