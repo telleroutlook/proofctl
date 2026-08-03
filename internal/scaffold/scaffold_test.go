@@ -262,6 +262,29 @@ func TestInit_WritesTemplateContent(t *testing.T) {
 	}
 }
 
+// TestInit_Metamath verifies that Init for the metamath domain writes graph.json,
+// policy file, and example.mm.
+func TestInit_Metamath(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	d, err := scaffold.Lookup("metamath")
+	if err != nil {
+		t.Fatalf("Lookup(metamath): %v", err)
+	}
+	if err := scaffold.Init(root, d); err != nil {
+		t.Fatalf("Init(metamath): %v", err)
+	}
+	for _, rel := range []string{
+		"graph.json",
+		filepath.Join("policies", "metamath-v1.json"),
+		"example.mm",
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); os.IsNotExist(err) {
+			t.Errorf("Init(metamath): expected file %q was not created", rel)
+		}
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

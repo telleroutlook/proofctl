@@ -29,6 +29,9 @@ type Domain struct {
 	BridgeSrc string
 	// NegativeTests indicates whether to scaffold tests/negative/ on init.
 	NegativeTests bool
+	// ExtraTemplates maps destination path (relative to project root) →
+	// source path inside templates/. Written after graph/policy/bridge.
+	ExtraTemplates map[string]string
 }
 
 //go:embed bridge.py
@@ -56,6 +59,15 @@ var KnownDomains = []Domain{
 		PolicyTemplate: "templates/qmd-policy.json",
 		GraphTemplate:  "templates/qmd-graph.json",
 	},
+	{
+		Name:           "metamath",
+		Description:    "Metamath formal proof domain: verify .mm proof files using the metamath checker",
+		PolicyTemplate: "templates/metamath-policy.json",
+		GraphTemplate:  "templates/metamath-graph.json",
+		ExtraTemplates: map[string]string{
+			"example.mm": "templates/metamath-example.mm",
+		},
+	},
 }
 
 // Lookup returns the Domain for name, or an error if unknown.
@@ -65,7 +77,7 @@ func Lookup(name string) (Domain, error) {
 			return d, nil
 		}
 	}
-	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd)", name)
+	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath)", name)
 }
 
 // Init writes all scaffold files for domain into root.
@@ -95,6 +107,11 @@ func Init(root string, d Domain) error {
 	}
 	if d.NegativeTests {
 		if err := writeNegativeTests(root); err != nil {
+			return err
+		}
+	}
+	for dst, src := range d.ExtraTemplates {
+		if err := writeTemplate(root, dst, src); err != nil {
 			return err
 		}
 	}

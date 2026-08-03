@@ -1,0 +1,38 @@
+{
+  "claims": [
+    {
+      "id": "thm-lem",
+      "kind": "lemma",
+      "statement": {
+        "text": "Replace with your lemma statement",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "evidence": [],
+      "checker_policy": "metamath-checker-v1"
+    },
+    {
+      "id": "thm-main",
+      "kind": "theorem",
+      "statement": {
+        "text": "Replace with your main theorem statement",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": ["thm-lem"],
+      "evidence": [],
+      "checker_policy": "metamath-checker-v1"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "metamath-checker-v1",
+      "protocol_version": 1,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {
+        "kind": "native",
+        "cmd": ["python3", "${PROOFCTL_ADAPTERS}/metamath/bridge.py"]
+      }
+    }
+  ],
+  "evidence": []
+}
