@@ -1,0 +1,65 @@
+{
+  "claims": [
+    {
+      "id": "lem-even-sum",
+      "kind": "lemma",
+      "statement": {
+        "text": "The sum of two even integers is even.",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "checker_policy": {
+        "checker_id": "echo-checker-v1",
+        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "allowed_assurances": ["exact-replay"],
+        "runtime": {
+          "type": "native",
+          "cmd": ["sh", "checker/check.sh"]
+        }
+      }
+    },
+    {
+      "id": "lem-odd-plus-even",
+      "kind": "lemma",
+      "statement": {
+        "text": "An odd integer plus an even integer is odd.",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": ["lem-even-sum"],
+      "checker_policy": {
+        "checker_id": "echo-checker-v1",
+        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "allowed_assurances": ["exact-replay"],
+        "runtime": {
+          "type": "native",
+          "cmd": ["sh", "checker/check.sh"]
+        }
+      }
+    },
+    {
+      "id": "thm-parity-main",
+      "kind": "theorem",
+      "statement": {
+        "text": "Parity arithmetic is consistent: even+even=even, odd+even=odd.",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": ["lem-even-sum", "lem-odd-plus-even"],
+      "checker_policy": {
+        "checker_id": "echo-checker-v1",
+        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "allowed_assurances": ["exact-replay"],
+        "runtime": {
+          "type": "native",
+          "cmd": ["sh", "checker/check.sh"]
+        }
+      }
+    }
+  ],
+  "checkers": [
+    {
+      "id": "echo-checker-v1",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "evidence": []
+}

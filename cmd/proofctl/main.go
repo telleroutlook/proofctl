@@ -100,7 +100,8 @@ Usage:
   proofctl [--json] <subcommand> [args...]
 
 Subcommands:
-  init      Initialize a new proof graph project
+  init      Initialize a new proof graph project (--domain cap|lrat|qmd)
+  domains   List known domains (domains list)
   compile   Compile a proof source file to ProofGraph IR
   check     Run checkers for one or more claims
   verify    Verify attestation integrity
@@ -109,6 +110,10 @@ Subcommands:
   frontier  List unresolved direct dependencies of a claim
   impact    List claims that depend on a given claim
   cache     Manage the checker result cache
+  cas       Manage the content-addressed store (import|list)
+  pin       Pin a checker binary digest and command (pin checker --cmd ...)
+  env       Manage checker runtime environment (verify|snapshot)
+  replay    Cold-start generator+checker replay for a claim
   release   Run the release gate
   snapshot  Write a point-in-time snapshot of claims + statuses
   status    Print the current proof graph status

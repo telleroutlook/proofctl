@@ -9,6 +9,22 @@ Mathematical projects provide:
 
 proofctl provides everything else.
 
+## Try it now — self-contained demo
+
+No external checker or separate repository needed:
+
+```sh
+cd examples/minimal
+proofctl init --policy policies/minimal-v1.json
+proofctl compile --fix-digests graph.json
+proofctl status          # all open
+# ... replay each claim (see examples/minimal/README.md for full commands)
+proofctl release --policy policies/minimal-v1.json
+cat .proofctl/STATUS.json  # "released": true
+```
+
+See [`examples/minimal/README.md`](examples/minimal/README.md) for the complete step-by-step walkthrough.
+
 ## Quick Start — New CAP Project
 
 ```bash
@@ -64,7 +80,7 @@ Requires Go 1.22 or later.
 ## Project Layout
 
 ```
-cmd/proofctl/          CLI entry point (14 subcommands)
+cmd/proofctl/          CLI entry point (17 subcommands)
 internal/
   ir/                  Intermediate representation types and strict decoder
   dag/                 Claim DAG (validation, closure, impact, frontier)

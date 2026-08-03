@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"x\",\"kind\":\"definition\",\"statement\":{\"text\":\"t\",\"digest\":\"sha256:abc\"},\"depends_on\":[],\"required_assura.ce\":[],\"evidence\":[],\"checker_policy\":\"\"}")

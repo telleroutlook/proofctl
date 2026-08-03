@@ -15,11 +15,11 @@ import (
 
 // envLock is the structure of environment.lock JSON files.
 type envLock struct {
-	GeneratedAt string            `json:"generated_at"`
-	Checker     string            `json:"checker"`
-	PythonVersion string          `json:"python_version,omitempty"`
-	Packages    map[string]string `json:"packages,omitempty"`
-	Note        string            `json:"note,omitempty"`
+	GeneratedAt   string            `json:"generated_at"`
+	Checker       string            `json:"checker"`
+	PythonVersion string            `json:"python_version,omitempty"`
+	Packages      map[string]string `json:"packages,omitempty"`
+	Note          string            `json:"note,omitempty"`
 }
 
 func cmdEnv(args []string, useJSON bool) {

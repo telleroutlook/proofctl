@@ -141,6 +141,7 @@ func writeNegativeTests(root string) error {
 	}
 	return nil
 }
+
 // <root>/adapters/bridge.py with mode 0755 (executable).
 // No-ops if the destination already exists.
 func writeBridge(root, src string) error {

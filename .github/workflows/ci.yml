@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Run fuzz job daily at 02:00 UTC.
+    - cron: "0 2 * * *"
 
 jobs:
   build-and-test:
@@ -35,6 +38,14 @@ jobs:
             exit 1
           fi
 
+      - name: bridge.py sync check
+        run: |
+          if ! diff adapters/cap/bridge.py internal/scaffold/bridge.py; then
+            echo "ERROR: adapters/cap/bridge.py and internal/scaffold/bridge.py are out of sync."
+            echo "Update internal/scaffold/bridge.py to match adapters/cap/bridge.py, then rebuild."
+            exit 1
+          fi
+
       - name: Static analysis
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 
@@ -43,3 +54,24 @@ jobs:
 
       - name: Test with race detector
         run: go test -race -timeout 120s ./...
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    # Run on schedule or when fuzz-related files change.
+    if: github.event_name == 'schedule' || github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Fuzz FuzzDecodeStrict_Claim
+        run: go test -fuzz=FuzzDecodeStrict_Claim -fuzztime=30s ./internal/ir/...
+
+      - name: Fuzz FuzzCanonicalJSON
+        run: go test -fuzz=FuzzCanonicalJSON -fuzztime=30s ./internal/ir/...

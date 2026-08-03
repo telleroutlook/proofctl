@@ -20,8 +20,8 @@ import (
 // multiFlag is a repeatable string flag that collects all occurrences.
 type multiFlag []string
 
-func (f *multiFlag) String() string        { return strings.Join(*f, ", ") }
-func (f *multiFlag) Set(v string) error    { *f = append(*f, v); return nil }
+func (f *multiFlag) String() string     { return strings.Join(*f, ", ") }
+func (f *multiFlag) Set(v string) error { *f = append(*f, v); return nil }
 
 // cmdReplay implements the replay subcommand.
 //

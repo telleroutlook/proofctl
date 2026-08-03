@@ -201,7 +201,8 @@ func (g *Gate) writeStatus(rs ReleaseStatus) error {
 }
 
 // buildClaimSummary counts claims by status.
-func buildClaimSummary(statuses map[string]ir.Status) *ClaimSummary {	s := &ClaimSummary{}
+func buildClaimSummary(statuses map[string]ir.Status) *ClaimSummary {
+	s := &ClaimSummary{}
 	for _, st := range statuses {
 		switch st {
 		case ir.StatusAccepted:
@@ -317,20 +318,20 @@ const ManifestFile = "release-manifest.json"
 
 // releaseManifest is written alongside STATUS.json on a successful release.
 type releaseManifest struct {
-	FormatVersion string             `json:"format_version"`
-	Status        string             `json:"status"`
-	Generated     string             `json:"generated"`
-	ReleaseTarget string             `json:"release_target"`
+	FormatVersion string              `json:"format_version"`
+	Status        string              `json:"status"`
+	Generated     string              `json:"generated"`
+	ReleaseTarget string              `json:"release_target"`
 	Certificates  []manifestCertEntry `json:"certificates"`
 }
 
 type manifestCertEntry struct {
-	Path          string `json:"path"`
-	Digest        string `json:"digest"`
-	MediaType     string `json:"media_type,omitempty"`
-	CAPFormat     string `json:"cap_format_version,omitempty"`
-	CheckerExit   string `json:"checker_exit,omitempty"`
-	MarginRatio   string `json:"margin_ratio,omitempty"`
+	Path           string `json:"path"`
+	Digest         string `json:"digest"`
+	MediaType      string `json:"media_type,omitempty"`
+	CAPFormat      string `json:"cap_format_version,omitempty"`
+	CheckerExit    string `json:"checker_exit,omitempty"`
+	MarginRatio    string `json:"margin_ratio,omitempty"`
 	ColdReplayDate string `json:"cold_replay_date,omitempty"`
 }
 
