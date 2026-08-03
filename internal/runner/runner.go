@@ -176,8 +176,8 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 		// Context deadline exceeded → unavailable.
 		if ctx.Err() != nil {
 			return nil, &RunError{
-				Code:   ExitUnavailable,
-				Stderr: fmt.Sprintf("checker %q timed out after %v", checkerID.ID, timeout),
+				Code:    ExitUnavailable,
+				Stderr:  fmt.Sprintf("checker %q timed out after %v", checkerID.ID, timeout),
 				Wrapped: ctx.Err(),
 			}
 		}

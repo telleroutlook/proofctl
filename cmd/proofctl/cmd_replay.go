@@ -361,10 +361,10 @@ func cmdReplay(args []string, useJSON bool) {
 // runReplayDryRun validates CAS state and generator syntax without executing anything.
 func runReplayDryRun(pairs []replayPair, casRoot, root, checkerCmd, claimID string, useJSON bool) {
 	type dryItem struct {
-		Digest      string `json:"digest"`
-		InCAS       bool   `json:"in_cas"`
-		PathHint    string `json:"path_hint,omitempty"`
-		HasCertPlaceholder bool `json:"has_cert_placeholder"`
+		Digest             string `json:"digest"`
+		InCAS              bool   `json:"in_cas"`
+		PathHint           string `json:"path_hint,omitempty"`
+		HasCertPlaceholder bool   `json:"has_cert_placeholder"`
 	}
 
 	pg := loadCompiledGraph(root)

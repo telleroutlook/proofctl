@@ -42,10 +42,10 @@ func cmdStatus(args []string, useJSON bool) {
 
 	if useJSON {
 		type claimStatusEntry struct {
-			Status             string `json:"status"`
-			OpenReason         string `json:"open_reason,omitempty"`
-			BlockReason        string `json:"block_reason,omitempty"`
-			UnverifiedDigest   bool   `json:"unverified_digest,omitempty"`
+			Status           string `json:"status"`
+			OpenReason       string `json:"open_reason,omitempty"`
+			BlockReason      string `json:"block_reason,omitempty"`
+			UnverifiedDigest bool   `json:"unverified_digest,omitempty"`
 		}
 		claimsMap := make(map[string]claimStatusEntry, len(statuses))
 		for id, s := range statuses {
@@ -81,10 +81,10 @@ func cmdStatus(args []string, useJSON bool) {
 			}
 		}
 		type statusOutput struct {
-			Claims               map[string]claimStatusEntry `json:"claims"`
-			Summary              summaryEntry                `json:"summary"`
-			ReleaseTarget        interface{}                 `json:"release_target"`
-			UnverifiedDigests    []string                    `json:"unverified_digests,omitempty"`
+			Claims            map[string]claimStatusEntry `json:"claims"`
+			Summary           summaryEntry                `json:"summary"`
+			ReleaseTarget     interface{}                 `json:"release_target"`
+			UnverifiedDigests []string                    `json:"unverified_digests,omitempty"`
 		}
 		var unverified []string
 		for id := range zeroDigestWarnings {
