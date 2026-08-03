@@ -168,7 +168,7 @@ func TestGenerality_CASWorks(t *testing.T) {
 	lratContent := []byte("1 2 3 0\n4 5 6 0\n0\n")
 
 	// Store CNF blob.
-	cnfDigest, cnfSize, err := store.Store(bytes.NewReader(cnfContent))
+	cnfDigest, cnfSize, _, err := store.Store(bytes.NewReader(cnfContent))
 	if err != nil {
 		t.Fatalf("store CNF: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestGenerality_CASWorks(t *testing.T) {
 	}
 
 	// Store LRAT blob.
-	lratDigest, lratSize, err := store.Store(bytes.NewReader(lratContent))
+	lratDigest, lratSize, _, err := store.Store(bytes.NewReader(lratContent))
 	if err != nil {
 		t.Fatalf("store LRAT: %v", err)
 	}

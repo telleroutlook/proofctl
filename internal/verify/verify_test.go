@@ -72,7 +72,7 @@ func makeTestCAS(t *testing.T) (*cas.Store, ir.EvidenceDescriptor, string) {
 		t.Fatalf("open evidence: %v", err)
 	}
 	defer func() { _ = f.Close() }()
-	digest, size, err := store.Store(f)
+	digest, size, _, err := store.Store(f)
 	if err != nil {
 		t.Fatalf("store evidence: %v", err)
 	}

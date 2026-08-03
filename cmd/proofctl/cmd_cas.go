@@ -70,11 +70,12 @@ func cmdCasImport(args []string, useJSON bool) {
 	}
 
 	type importResult struct {
-		File    string `json:"file"`
-		Digest  string `json:"digest"`
-		Size    int64  `json:"size"`
-		Updated bool   `json:"size_updated"`
-		Error   string `json:"error,omitempty"`
+		File       string `json:"file"`
+		Digest     string `json:"digest"`
+		Size       int64  `json:"size"`
+		Updated    bool   `json:"size_updated"`
+		AlreadyHad bool   `json:"already_existed,omitempty"`
+		Error      string `json:"error,omitempty"`
 	}
 	var results []importResult
 
@@ -90,7 +91,7 @@ func cmdCasImport(args []string, useJSON bool) {
 			}
 			continue
 		}
-		digest, size, err := store.Store(f)
+		digest, size, alreadyHad, err := store.Store(f)
 		_ = f.Close()
 		if err != nil {
 			errMsg := fmt.Sprintf("store %s: %v", file, err)
@@ -124,7 +125,7 @@ func cmdCasImport(args []string, useJSON bool) {
 			}
 		}
 
-		results = append(results, importResult{File: file, Digest: digest, Size: size, Updated: updated})
+		results = append(results, importResult{File: file, Digest: digest, Size: size, Updated: updated, AlreadyHad: alreadyHad})
 	}
 
 	// Write back graph source if evidence sizes changed.
@@ -151,14 +152,18 @@ func cmdCasImport(args []string, useJSON bool) {
 	} else {
 		for _, r := range results {
 			if r.Error != "" {
-				fmt.Printf("FAIL  %s — %s\n", r.File, r.Error)
+				fmt.Printf("FAIL   %s — %s\n", r.File, r.Error)
 				continue
 			}
 			sizeNote := ""
 			if r.Updated {
 				sizeNote = fmt.Sprintf(" [size updated: %d]", r.Size)
 			}
-			fmt.Printf("OK    %s → %s%s\n", r.File, r.Digest, sizeNote)
+			if r.AlreadyHad {
+				fmt.Printf("EXISTS %s → %s%s\n", r.File, r.Digest, sizeNote)
+			} else {
+				fmt.Printf("OK     %s → %s%s\n", r.File, r.Digest, sizeNote)
+			}
 		}
 		if graphModified {
 			fmt.Printf("Updated evidence sizes in %s\n", srcPath)
@@ -221,7 +226,24 @@ func cmdCasList(args []string, useJSON bool) {
 func cmdCasImportDir(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("cas import-dir", flag.ContinueOnError)
 	patternFlag := fs.String("pattern", "*", "glob pattern to filter files (e.g. '*.tex', '*.json')")
-	if err := fs.Parse(args); err != nil {
+	// Go's flag package stops at the first non-flag argument, so flags after the
+	// directory (e.g. import-dir proof/ --pattern "*.tex") are silently ignored.
+	// Reorder: separate flag args from positional args and parse flags first.
+	var flagArgs, posArgs []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			flagArgs = append(flagArgs, args[i])
+			// Consume the value for --flag value style (not --flag=value).
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") &&
+				(args[i] == "--pattern" || args[i] == "-pattern") {
+				i++
+				flagArgs = append(flagArgs, args[i])
+			}
+		} else {
+			posArgs = append(posArgs, args[i])
+		}
+	}
+	if err := fs.Parse(append(flagArgs, posArgs...)); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
 	if fs.NArg() == 0 {
@@ -266,11 +288,12 @@ func cmdCasImportDir(args []string, useJSON bool) {
 	}
 
 	type importResult struct {
-		File    string `json:"file"`
-		Digest  string `json:"digest,omitempty"`
-		Size    int64  `json:"size,omitempty"`
-		Updated bool   `json:"size_updated,omitempty"`
-		Error   string `json:"error,omitempty"`
+		File       string `json:"file"`
+		Digest     string `json:"digest,omitempty"`
+		Size       int64  `json:"size,omitempty"`
+		Updated    bool   `json:"size_updated,omitempty"`
+		AlreadyHad bool   `json:"already_existed,omitempty"`
+		Error      string `json:"error,omitempty"`
 	}
 	var results []importResult
 	graphModified := false
@@ -299,7 +322,7 @@ func cmdCasImportDir(args []string, useJSON bool) {
 			results = append(results, importResult{File: displayPath, Error: fmt.Sprintf("cannot open: %v", openErr)})
 			continue
 		}
-		digest, size, storeErr := store.Store(f)
+		digest, size, alreadyHad, storeErr := store.Store(f)
 		_ = f.Close()
 		if storeErr != nil {
 			results = append(results, importResult{File: displayPath, Error: fmt.Sprintf("store: %v", storeErr)})
@@ -315,7 +338,7 @@ func cmdCasImportDir(args []string, useJSON bool) {
 				updated = true
 			}
 		}
-		results = append(results, importResult{File: displayPath, Digest: digest, Size: size, Updated: updated})
+		results = append(results, importResult{File: displayPath, Digest: digest, Size: size, Updated: updated, AlreadyHad: alreadyHad})
 	}
 
 	if graphModified {
@@ -340,17 +363,38 @@ func cmdCasImportDir(args []string, useJSON bool) {
 	imported := 0
 	for _, r := range results {
 		if r.Error != "" {
-			fmt.Printf("FAIL  %s — %s\n", r.File, r.Error)
+			fmt.Printf("FAIL   %s — %s\n", r.File, r.Error)
 		} else {
 			sizeNote := ""
 			if r.Updated {
 				sizeNote = fmt.Sprintf(" [size updated: %d]", r.Size)
 			}
-			fmt.Printf("OK    %s → %s%s\n", r.File, r.Digest, sizeNote)
-			imported++
+			if r.AlreadyHad {
+				fmt.Printf("EXISTS %s → %s%s\n", r.File, r.Digest, sizeNote)
+			} else {
+				fmt.Printf("OK     %s → %s%s\n", r.File, r.Digest, sizeNote)
+				imported++
+			}
 		}
 	}
-	fmt.Printf("\n%d files imported, %d failed\n", imported, len(results)-imported)
+	fmt.Printf("\n%d files imported, %d already existed, %d failed\n",
+		imported, func() int {
+			n := 0
+			for _, r := range results {
+				if r.AlreadyHad {
+					n++
+				}
+			}
+			return n
+		}(), func() int {
+			n := 0
+			for _, r := range results {
+				if r.Error != "" {
+					n++
+				}
+			}
+			return n
+		}())
 	if graphModified {
 		fmt.Printf("Updated evidence sizes in %s\n", srcPath)
 	}

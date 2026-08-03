@@ -21,7 +21,7 @@ func TestStoreSmallBlob(t *testing.T) {
 	wantDigest := "sha256:" + wantHex
 	wantSize := int64(len(content))
 
-	gotDigest, gotSize, err := s.Store(bytes.NewReader(content))
+	gotDigest, gotSize, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -39,11 +39,11 @@ func TestStoreIdempotent(t *testing.T) {
 	s := newTestStore(t)
 
 	content := []byte("idempotent content")
-	d1, sz1, err := s.Store(bytes.NewReader(content))
+	d1, sz1, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("first Store: %v", err)
 	}
-	d2, sz2, err := s.Store(bytes.NewReader(content))
+	d2, sz2, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("second Store: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestOpenExistingBlob(t *testing.T) {
 	s := newTestStore(t)
 
 	content := []byte("round-trip content")
-	digest, _, err := s.Store(bytes.NewReader(content))
+	digest, _, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestVerifyCorrectDescriptor(t *testing.T) {
 	s := newTestStore(t)
 
 	content := []byte("verify me")
-	digest, size, err := s.Store(bytes.NewReader(content))
+	digest, size, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestVerifyWrongSize(t *testing.T) {
 	s := newTestStore(t)
 
 	content := []byte("size check content")
-	digest, size, err := s.Store(bytes.NewReader(content))
+	digest, size, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -139,14 +139,14 @@ func TestVerifyWrongDigest(t *testing.T) {
 	s := newTestStore(t)
 
 	content := []byte("digest mismatch content")
-	_, size, err := s.Store(bytes.NewReader(content))
+	_, size, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 
 	// Store a different blob and use its digest for the wrong descriptor.
 	other := []byte("completely different blob for mismatch test")
-	otherDigest, _, err := s.Store(bytes.NewReader(other))
+	otherDigest, _, _, err := s.Store(bytes.NewReader(other))
 	if err != nil {
 		t.Fatalf("Store other: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestStoreEmptyBlob(t *testing.T) {
 	wantHex := sha256hex([]byte{})
 	wantDigest := "sha256:" + wantHex
 
-	gotDigest, gotSize, err := s.Store(bytes.NewReader([]byte{}))
+	gotDigest, gotSize, _, err := s.Store(bytes.NewReader([]byte{}))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}

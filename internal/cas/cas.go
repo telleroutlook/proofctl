@@ -35,13 +35,14 @@ func New(root string) (*Store, error) {
 	return &Store{root: root}, nil
 }
 
-// Store writes the content of r into the CAS and returns the digest and size.
+// Store writes the content of r into the CAS and returns the digest, size,
+// and whether the blob already existed (already=true means no write occurred).
 // If a blob with the same digest already exists it is not overwritten.
-func (s *Store) Store(r io.Reader) (digest string, size int64, err error) {
+func (s *Store) Store(r io.Reader) (digest string, size int64, already bool, err error) {
 	// Write to a temp file while hashing.
 	tmp, err := os.CreateTemp(s.root, "cas-tmp-*")
 	if err != nil {
-		return "", 0, fmt.Errorf("cas: create temp: %w", err)
+		return "", 0, false, fmt.Errorf("cas: create temp: %w", err)
 	}
 	tmpName := tmp.Name()
 	defer func() {
@@ -59,7 +60,7 @@ func (s *Store) Store(r io.Reader) (digest string, size int64, err error) {
 	}
 	_ = tmp.Close()
 	if copyErr != nil {
-		return "", 0, fmt.Errorf("cas: write: %w", copyErr)
+		return "", 0, false, fmt.Errorf("cas: write: %w", copyErr)
 	}
 
 	hexDigest := hex.EncodeToString(h.Sum(nil))
@@ -69,20 +70,20 @@ func (s *Store) Store(r io.Reader) (digest string, size int64, err error) {
 	blobPath := s.blobPath(hexDigest)
 	if err2 := os.MkdirAll(filepath.Dir(blobPath), 0o755); err2 != nil {
 		err = fmt.Errorf("cas: mkdir: %w", err2)
-		return "", 0, err
+		return "", 0, false, err
 	}
 
 	// If the blob already exists, remove the temp file and return.
 	if _, statErr := os.Stat(blobPath); statErr == nil {
 		_ = os.Remove(tmpName)
-		return digest, size, nil
+		return digest, size, true, nil
 	}
 
 	if renameErr := os.Rename(tmpName, blobPath); renameErr != nil {
 		err = fmt.Errorf("cas: finalize: %w", renameErr)
-		return "", 0, err
+		return "", 0, false, err
 	}
-	return digest, size, nil
+	return digest, size, false, nil
 }
 
 // Open returns a ReadCloser for the blob identified by digest.

@@ -286,7 +286,15 @@ func cmdVerify(args []string, useJSON bool) {
 		if len(fs.Args()) == 0 {
 			die(useJSON, errors.CodeInvalidInput, "usage: proofctl verify @<claim-id> or --project")
 		}
-		claimID := strings.TrimPrefix(fs.Args()[0], "@")
+		arg := fs.Args()[0]
+		// Accept both @<claim-id> and a path to an attestation JSON file.
+		var claimID string
+		if strings.HasSuffix(arg, ".json") {
+			base := strings.TrimSuffix(filepath.Base(arg), ".json")
+			claimID = strings.TrimPrefix(base, "@")
+		} else {
+			claimID = strings.TrimPrefix(arg, "@")
+		}
 		res := runOne(claimID)
 		if res.Error != "" || res.Outcome != "accepted" {
 			exitCode = 1

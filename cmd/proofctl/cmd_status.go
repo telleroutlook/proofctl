@@ -55,6 +55,10 @@ func printStatus(verbose, useJSON bool) {
 	if useJSON {
 		type claimStatusEntry struct {
 			Status           string `json:"status"`
+			Assurance        string `json:"assurance,omitempty"`
+			StartFreshness   string `json:"start_freshness,omitempty"`
+			EndFreshness     string `json:"end_freshness,omitempty"`
+			EvidenceCount    int    `json:"evidence_count,omitempty"`
 			OpenReason       string `json:"open_reason,omitempty"`
 			BlockReason      string `json:"block_reason,omitempty"`
 			UnverifiedDigest bool   `json:"unverified_digest,omitempty"`
@@ -62,8 +66,14 @@ func printStatus(verbose, useJSON bool) {
 		claimsMap := make(map[string]claimStatusEntry, len(statuses))
 		for id, s := range statuses {
 			entry := claimStatusEntry{Status: string(s)}
-			if att, ok := attestations[id]; ok && att.BlockReason != "" {
-				entry.BlockReason = att.BlockReason
+			if att, ok := attestations[id]; ok {
+				if att.BlockReason != "" {
+					entry.BlockReason = att.BlockReason
+				}
+				entry.Assurance = string(att.Assurance)
+				entry.StartFreshness = att.StartFreshness
+				entry.EndFreshness = att.EndFreshness
+				entry.EvidenceCount = len(att.Evidence)
 			}
 			if s == ir.StatusOpen {
 				entry.OpenReason = openReasons[id]

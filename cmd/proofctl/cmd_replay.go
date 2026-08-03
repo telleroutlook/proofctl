@@ -523,7 +523,7 @@ func autoImportFromPathHint(root, casRoot, digest string) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("open CAS: %w", err)
 		}
-		gotDigest, _, err := store.Store(f)
+		gotDigest, _, _, err := store.Store(f)
 		if err != nil {
 			return false, fmt.Errorf("CAS store: %w", err)
 		}
@@ -768,8 +768,11 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 			pairs[i] = replayPair{digest: entry.Evidence[i], generator: entry.Generator[i]}
 		}
 
-		// Check --skip-if-accepted for all claims in this entry.
-		allSkipped := true
+		// Determine which claims in this entry still need work.
+		// When --skip-if-accepted is set, record already-accepted claims and
+		// collect the remainder. If all claims are already accepted, skip the
+		// entire entry (no need to run the generator).
+		var pendingClaims []string
 		for _, claimID := range entry.Claims {
 			if skipAccepted {
 				if att, ok := attestations[claimID]; ok &&
@@ -783,10 +786,9 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 					continue
 				}
 			}
-			allSkipped = false
-			break
+			pendingClaims = append(pendingClaims, claimID)
 		}
-		if allSkipped && skipAccepted {
+		if len(pendingClaims) == 0 {
 			continue
 		}
 
@@ -838,7 +840,7 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 		}
 
 		if !entryPass {
-			for _, claimID := range entry.Claims {
+			for _, claimID := range pendingClaims {
 				allResults = append(allResults, batchResult{
 					ClaimID: claimID, Pass: false, FailReason: firstFailReason,
 				})
@@ -910,7 +912,7 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 				}
 			}
 			failMsg := strings.Join(reasons, "; ")
-			for _, claimID := range entry.Claims {
+			for _, claimID := range pendingClaims {
 				allResults = append(allResults, batchResult{
 					ClaimID: claimID, Pass: false, FailReason: failMsg,
 				})
@@ -919,7 +921,7 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 			continue
 		}
 
-		// All checks passed — write one attestation per claim.
+		// All checks passed — write one attestation per pending claim.
 		assurance := ir.AssuranceExactReplay
 		if entry.Semantic {
 			assurance = ir.AssuranceReproducibleComputation
@@ -927,19 +929,7 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 		digests := entry.Evidence
 		generators := entry.Generator
 
-		for _, claimID := range entry.Claims {
-			if skipAccepted {
-				if att, ok := attestations[claimID]; ok &&
-					att.Outcome == string(ir.StatusAccepted) &&
-					att.StartFreshness != "" {
-					allResults = append(allResults, batchResult{
-						ClaimID: claimID, Pass: true, Skipped: true,
-						SkipReason: "already accepted with freshness",
-					})
-					totalSkip++
-					continue
-				}
-			}
+		for _, claimID := range pendingClaims {
 
 			att := ir.Attestation{
 				ClaimID:        claimID,

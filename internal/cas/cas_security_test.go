@@ -33,7 +33,7 @@ func TestAdversarial_WrongSize(t *testing.T) {
 	s := newSecTestStore(t)
 
 	content := []byte("real blob content for size test")
-	digest, _, err := s.Store(bytes.NewReader(content))
+	digest, _, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -55,14 +55,14 @@ func TestAdversarial_WrongDigest(t *testing.T) {
 	s := newSecTestStore(t)
 
 	content := []byte("real blob content for digest test")
-	_, size, err := s.Store(bytes.NewReader(content))
+	_, size, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 
 	// Also store a different blob to get a valid-format but wrong digest.
 	other := []byte("completely different content")
-	otherDigest, _, err := s.Store(bytes.NewReader(other))
+	otherDigest, _, _, err := s.Store(bytes.NewReader(other))
 	if err != nil {
 		t.Fatalf("Store other: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestAdversarial_SymlinkEscape(t *testing.T) {
 
 	// Store a real blob so the sha256/<prefix>/ directory structure exists.
 	content := []byte("legit content")
-	digest, _, err := s.Store(bytes.NewReader(content))
+	digest, _, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestStore_IOError(t *testing.T) {
 	}
 	defer func() { _ = os.Chmod(filepath.Join(dir, "cas"), 0o755) }()
 
-	_, _, err = s.Store(bytes.NewReader([]byte("data")))
+	_, _, _, err = s.Store(bytes.NewReader([]byte("data")))
 	if err == nil {
 		t.Error("expected error storing to read-only CAS root, got nil")
 	}
@@ -286,7 +286,7 @@ func TestVerify_SymlinkEscape(t *testing.T) {
 	}
 
 	content := []byte("legit")
-	digest, size, err := s.Store(bytes.NewReader(content))
+	digest, size, _, err := s.Store(bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestAdversarial_ConcurrentStore(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < storesPerGoroutine; i++ {
-				gotDigest, gotSize, err := s.Store(bytes.NewReader(content))
+				gotDigest, gotSize, _, err := s.Store(bytes.NewReader(content))
 				if err != nil {
 					errCh <- err
 					return
