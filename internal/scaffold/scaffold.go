@@ -84,6 +84,16 @@ var KnownDomains = []Domain{
 			"lakefile.lean": "templates/lean-lakefile.lean",
 		},
 	},
+	{
+		Name:           "coq",
+		Description:    "Coq/Rocq formal proof domain: verify .vo objects via coqchk; uses BatchGroup for whole-project verification",
+		PolicyTemplate: "templates/coq-policy.json",
+		GraphTemplate:  "templates/coq-graph.json",
+		ExtraTemplates: map[string]string{
+			"MyProof.v":   "templates/coq-MyProof.v",
+			"_CoqProject": "templates/coq-_CoqProject",
+		},
+	},
 }
 
 // Lookup returns the Domain for name, or an error if unknown.
@@ -93,7 +103,7 @@ func Lookup(name string) (Domain, error) {
 			return d, nil
 		}
 	}
-	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt, lean)", name)
+	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt, lean, coq)", name)
 }
 
 // Init writes all scaffold files for domain into root.

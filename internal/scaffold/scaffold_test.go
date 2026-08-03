@@ -330,6 +330,30 @@ func TestInit_Smt(t *testing.T) {
 	}
 }
 
+// TestInit_Coq verifies that Init for the coq domain writes graph.json,
+// policy file, MyProof.v, and _CoqProject.
+func TestInit_Coq(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	d, err := scaffold.Lookup("coq")
+	if err != nil {
+		t.Fatalf("Lookup(coq): %v", err)
+	}
+	if err := scaffold.Init(root, d); err != nil {
+		t.Fatalf("Init(coq): %v", err)
+	}
+	for _, rel := range []string{
+		"graph.json",
+		filepath.Join("policies", "coq-v1.json"),
+		"MyProof.v",
+		"_CoqProject",
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); os.IsNotExist(err) {
+			t.Errorf("Init(coq): expected file %q was not created", rel)
+		}
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

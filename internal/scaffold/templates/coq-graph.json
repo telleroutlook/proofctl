@@ -1,0 +1,28 @@
+{
+  "claims": [
+    {
+      "id": "thm-CoqProof-main",
+      "kind": "theorem",
+      "statement": {
+        "text": "Coq theorem: thm-CoqProof-main",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "evidence": [],
+      "checker_policy": "coq-checker-v1",
+      "batch_group": "coq-env"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "coq-checker-v1",
+      "protocol_version": 1,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {
+        "kind": "native",
+        "cmd": ["python3", "${PROOFCTL_ADAPTERS}/coq/bridge.py"]
+      }
+    }
+  ],
+  "evidence": []
+}

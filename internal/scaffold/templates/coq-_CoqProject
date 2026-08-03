@@ -1,0 +1,5 @@
+## _CoqProject
+# Replace "MyProof" with your actual project name.
+# List all .v source files here.
+-R . MyProof
+MyProof.v
