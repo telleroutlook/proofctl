@@ -103,9 +103,11 @@ def _read_cert_field(cert_path: Path, field: str) -> str:
 def _extract_margin_from_stdout(stdout: str) -> str:
     """Extract margin_ratio / pivot_radius_ratio from checker stdout.
 
-    Tries two formats:
+    Tries three formats:
       1. JSON object with a "margin_ratio" or "pivot_radius_ratio" key.
       2. Plain-text lines with key=value pairs (e.g. "margin_ratio=3.3e8").
+      3. Checker natural-language format: "margin ratio = <value>" or
+         "margin ratio = <value> (..." (as printed by check_certificate.py).
     Returns the value as a string, or "" if not found.
     """
     text = stdout.strip()
@@ -121,11 +123,19 @@ def _extract_margin_from_stdout(stdout: str) -> str:
                     return str(v)
     except (json.JSONDecodeError, ValueError):
         pass
-    # Fall back to key=value scan.
+    # key=value scan (underscore form).
     for key in ("margin_ratio", "pivot_radius_ratio"):
         m = re.search(rf"(?:^|[\s,;])(?:pivot_radius_ratio|margin_ratio)\s*=\s*([^\s,;]+)", text, re.IGNORECASE | re.MULTILINE)
         if m:
             return m.group(1)
+    # Natural-language format: "[checker] margin ratio = min_pivot_lo / pivot_width = 33777230.07 (...)"
+    # Extract the last numeric value before any trailing parenthetical comment.
+    for line in text.splitlines():
+        if re.search(r"margin\s+ratio", line, re.IGNORECASE):
+            part = line.split("(")[0]  # strip trailing parenthetical comment
+            nums = re.findall(r"=\s*([0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)", part)
+            if nums:
+                return nums[-1]
     return ""
 
 
