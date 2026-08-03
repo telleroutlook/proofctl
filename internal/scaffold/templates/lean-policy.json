@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "target": "thm-MyProof-main",
+  "allowed_assurances": ["formal-kernel"],
+  "forbidden_assurances": ["assumption", "ai-review", "shadow-review"],
+  "required_claims": ["thm-MyProof-main"],
+  "required_metadata_keys": []
+}

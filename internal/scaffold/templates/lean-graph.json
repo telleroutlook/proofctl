@@ -1,0 +1,28 @@
+{
+  "claims": [
+    {
+      "id": "thm-MyProof-main",
+      "kind": "theorem",
+      "statement": {
+        "text": "Lean 4 theorem: thm-MyProof-main",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "evidence": [],
+      "checker_policy": "lean-checker-v1",
+      "batch_group": "lean-env"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "lean-checker-v1",
+      "protocol_version": 1,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {
+        "kind": "native",
+        "cmd": ["python3", "${PROOFCTL_ADAPTERS}/lean/bridge.py"]
+      }
+    }
+  ],
+  "evidence": []
+}

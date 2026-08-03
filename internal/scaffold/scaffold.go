@@ -74,6 +74,16 @@ var KnownDomains = []Domain{
 		PolicyTemplate: "templates/smt-policy.json",
 		GraphTemplate:  "templates/smt-graph.json",
 	},
+	{
+		Name:           "lean",
+		Description:    "Lean 4 formal proof domain: verify theorems via lake build; uses BatchGroup for whole-project verification",
+		PolicyTemplate: "templates/lean-policy.json",
+		GraphTemplate:  "templates/lean-graph.json",
+		ExtraTemplates: map[string]string{
+			"MyProof.lean":  "templates/lean-MyProof.lean",
+			"lakefile.lean": "templates/lean-lakefile.lean",
+		},
+	},
 }
 
 // Lookup returns the Domain for name, or an error if unknown.
@@ -83,7 +93,7 @@ func Lookup(name string) (Domain, error) {
 			return d, nil
 		}
 	}
-	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt)", name)
+	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt, lean)", name)
 }
 
 // Init writes all scaffold files for domain into root.

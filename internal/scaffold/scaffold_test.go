@@ -285,6 +285,51 @@ func TestInit_Metamath(t *testing.T) {
 	}
 }
 
+// TestInit_Lean verifies that Init for the lean domain writes graph.json,
+// policy file, MyProof.lean, and lakefile.lean.
+func TestInit_Lean(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	d, err := scaffold.Lookup("lean")
+	if err != nil {
+		t.Fatalf("Lookup(lean): %v", err)
+	}
+	if err := scaffold.Init(root, d); err != nil {
+		t.Fatalf("Init(lean): %v", err)
+	}
+	for _, rel := range []string{
+		"graph.json",
+		filepath.Join("policies", "lean-v1.json"),
+		"MyProof.lean",
+		"lakefile.lean",
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); os.IsNotExist(err) {
+			t.Errorf("Init(lean): expected file %q was not created", rel)
+		}
+	}
+}
+
+// TestInit_Smt verifies that Init for the smt domain writes graph.json and policy.
+func TestInit_Smt(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	d, err := scaffold.Lookup("smt")
+	if err != nil {
+		t.Fatalf("Lookup(smt): %v", err)
+	}
+	if err := scaffold.Init(root, d); err != nil {
+		t.Fatalf("Init(smt): %v", err)
+	}
+	for _, rel := range []string{
+		"graph.json",
+		filepath.Join("policies", "smt-v1.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); os.IsNotExist(err) {
+			t.Errorf("Init(smt): expected file %q was not created", rel)
+		}
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
