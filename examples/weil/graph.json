@@ -1,0 +1,159 @@
+{
+  "claims": [
+    {
+      "id": "def-frozen-model",
+      "kind": "definition",
+      "statement": {
+        "text": "Frozen model definition: the Weil explicit formula with fixed parameters a=3/10.",
+        "digest": "sha256:c1ea1bb8f7f6146f1ac72e01f5293f7e6e443432059fd0615ba3757d0d82199a"
+      },
+      "depends_on": [],
+      "required_assurance": ["exact-replay"],
+      "evidence": [],
+      "checker_policy": ""
+    },
+    {
+      "id": "lem-d1-normalization",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Normalization lemma D1: the input primitives are correctly normalized.",
+        "digest": "sha256:ed6ed7caa63dc47d48ec2f87a2db7a68b8680c200cc3d8e09a7e9c88515fab29"
+      },
+      "depends_on": ["def-frozen-model"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-d2-weil-reduction",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Weil reduction lemma D2: the explicit formula admits a valid Weil reduction.",
+        "digest": "sha256:83908f17c49659e158dbde965784414abab15434178ad0e2cbae76648dd686d3"
+      },
+      "depends_on": ["def-frozen-model", "lem-d1-normalization"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-d3-legendre",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Legendre transform lemma D3: the Legendre transform is correctly computed.",
+        "digest": "sha256:b81f6eda4e5728fc10963760d5bdb1f6f572da0cab21c3bf75e6a1127df06324"
+      },
+      "depends_on": ["lem-d2-weil-reduction"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-d4-kernel-bound",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Kernel bound lemma D4: the kernel satisfies the required bound.",
+        "digest": "sha256:676ef278d335874db543f85a2c903f2e48e1cb4006f457c256a172409aa5641b"
+      },
+      "depends_on": ["lem-d3-legendre"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-d5-log-moments",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Log-moments lemma D5: the log-moments are correctly computed.",
+        "digest": "sha256:c32f5ae3fbdcb9fe33e2c2f5c963229ee299fc576a0b181afc18e066dd5e38b7"
+      },
+      "depends_on": ["lem-d4-kernel-bound"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-path-a-primitives",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Path A primitives lemma: Path A primitive integrals are correctly evaluated.",
+        "digest": "sha256:1911e9a4fbaffe5ba3893dee9730e7736ec5f817b423cea6b85bcf5ed1dfe818"
+      },
+      "depends_on": ["lem-d5-log-moments"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-path-b-primitives",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Path B primitives lemma: Path B primitive integrals are correctly evaluated.",
+        "digest": "sha256:1f245613af40338c8d42cb505eb4e810e8e477a59f6b99324895950a2b57679e"
+      },
+      "depends_on": ["lem-d5-log-moments"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-ab-intersection",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Path A-B intersection lemma: the intersection of paths A and B is correctly computed.",
+        "digest": "sha256:650e531fe457bf4e1a5f2058d67c6691bbf4669ef46037a507752ec32c382912"
+      },
+      "depends_on": ["lem-path-a-primitives", "lem-path-b-primitives"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-matrix-reconstruction",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Matrix reconstruction lemma: the coefficient matrix is correctly reconstructed.",
+        "digest": "sha256:5736153c0e808b875a66ad11ace292b632f1aa070ea183b0a7b3449ec202c2e9"
+      },
+      "depends_on": ["lem-ab-intersection"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "lem-interval-ldlt",
+      "kind": "computational-lemma",
+      "statement": {
+        "text": "Interval LDLt lemma: the LDLt decomposition over intervals is correct.",
+        "digest": "sha256:de7e135b771139976ef025b3832e623030bf2efd1d07bd4b5c48f525864a6953"
+      },
+      "depends_on": ["lem-matrix-reconstruction"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    },
+    {
+      "id": "thm-main-radius-030",
+      "kind": "theorem",
+      "statement": {
+        "text": "Main theorem: the certified radius is 0.30.",
+        "digest": "sha256:a2021e0bc073c0947f34c38e496e99eb3c65c592f7a3618bbbfa6dd89312cf8a"
+      },
+      "depends_on": ["lem-interval-ldlt", "lem-d1-normalization", "lem-d2-weil-reduction", "lem-d3-legendre", "lem-d4-kernel-bound", "lem-d5-log-moments", "lem-path-a-primitives", "lem-path-b-primitives", "lem-ab-intersection", "lem-matrix-reconstruction", "def-frozen-model"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": "weil-cap-v2"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "weil-cap-v2",
+      "protocol_version": 1,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "schema_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {"kind": "native", "digest": ""},
+      "network": "none"
+    }
+  ],
+  "evidence": []
+}
