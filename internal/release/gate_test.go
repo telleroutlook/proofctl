@@ -150,7 +150,7 @@ func TestReleasePassWritesStatusJSON(t *testing.T) {
 	graph, atts := makeTestGraph(t)
 	pol := simplePolicy()
 
-	pass, blockers, err := g.Release(graph, atts, pol)
+	pass, blockers, err := g.Release(graph, atts, pol, nil)
 	if err != nil {
 		t.Fatalf("Release: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestReleaseFailWritesStatusJSON(t *testing.T) {
 	}
 	pol := simplePolicy()
 
-	pass, blockers, err := g.Release(graph, atts, pol)
+	pass, blockers, err := g.Release(graph, atts, pol, nil)
 	if err != nil {
 		t.Fatalf("Release: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestReleaseStatusJSONIsValidJSON(t *testing.T) {
 	graph, atts := makeTestGraph(t)
 	pol := simplePolicy()
 
-	if _, _, err := g.Release(graph, atts, pol); err != nil {
+	if _, _, err := g.Release(graph, atts, pol, nil); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestReleaseTwiceOverwrites(t *testing.T) {
 	pol := simplePolicy()
 
 	// First release: pass.
-	if _, _, err := g.Release(graph, atts, pol); err != nil {
+	if _, _, err := g.Release(graph, atts, pol, nil); err != nil {
 		t.Fatalf("first Release: %v", err)
 	}
 
@@ -266,7 +266,7 @@ func TestReleaseTwiceOverwrites(t *testing.T) {
 		Outcome:   string(ir.StatusRejected),
 		Assurance: ir.AssuranceFormalKernel,
 	}
-	if _, _, err := g.Release(graph, atts, pol); err != nil {
+	if _, _, err := g.Release(graph, atts, pol, nil); err != nil {
 		t.Fatalf("second Release: %v", err)
 	}
 
@@ -303,7 +303,7 @@ func TestReleaseTargetOnPass(t *testing.T) {
 	graph, atts := makeTestGraph(t)
 	pol := simplePolicy()
 
-	if _, _, err := g.Release(graph, atts, pol); err != nil {
+	if _, _, err := g.Release(graph, atts, pol, nil); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 
@@ -324,7 +324,7 @@ func TestReleaseTargetEmptyOnFail(t *testing.T) {
 	atts["c1"] = &ir.Attestation{ClaimID: "c1", Outcome: string(ir.StatusRejected), Assurance: ir.AssuranceFormalKernel}
 	pol := simplePolicy()
 
-	if _, _, err := g.Release(graph, atts, pol); err != nil {
+	if _, _, err := g.Release(graph, atts, pol, nil); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 
@@ -389,7 +389,7 @@ func TestRelease_ShadowModeBlocked(t *testing.T) {
 	}
 
 	// Release must write STATUS.json with released=false and defects map populated.
-	relPass, _, err := g.Release(d, atts, pol)
+	relPass, _, err := g.Release(d, atts, pol, nil)
 	if err != nil {
 		t.Fatalf("Release: %v", err)
 	}

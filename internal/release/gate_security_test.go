@@ -53,7 +53,7 @@ func TestAdversarial_MissingAttestation(t *testing.T) {
 		RequiredClaims: []string{"c1", "c2", "c3"},
 	}
 
-	pass, blockers, err := g.Release(graph, atts, pol)
+	pass, blockers, err := g.Release(graph, atts, pol, nil)
 	if err != nil {
 		t.Fatalf("Release: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestAdversarial_ForbiddenAssuranceInClosure(t *testing.T) {
 		ForbiddenAssurances: []string{string(ir.AssuranceAIReview)},
 	}
 
-	pass, blockers, err := g.Release(graph, atts, pol)
+	pass, blockers, err := g.Release(graph, atts, pol, nil)
 	if err != nil {
 		t.Fatalf("Release: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestAdversarial_DryRunMatchesRelease(t *testing.T) {
 	}
 
 	dryPass, dryBlockers := g.DryRun(graph, atts, pol)
-	relPass, relBlockers, err := g.Release(graph, atts, pol)
+	relPass, relBlockers, err := g.Release(graph, atts, pol, nil)
 	if err != nil {
 		t.Fatalf("Release: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestAdversarial_ConcurrentRelease(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := g.Release(graph, atts, pol)
+			_, _, err := g.Release(graph, atts, pol, nil)
 			if err != nil {
 				errCh <- err
 			}

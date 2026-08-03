@@ -27,6 +27,8 @@ type Domain struct {
 	// BridgeSrc is the path of the bridge script relative to the repo root,
 	// embedded separately via BridgeFS (may be empty if not applicable).
 	BridgeSrc string
+	// NegativeTests indicates whether to scaffold tests/negative/ on init.
+	NegativeTests bool
 }
 
 //go:embed bridge.py
@@ -40,6 +42,7 @@ var KnownDomains = []Domain{
 		PolicyTemplate: "templates/cap-policy.json",
 		GraphTemplate:  "templates/cap-graph.json",
 		BridgeSrc:      "bridge.py",
+		NegativeTests:  true,
 	},
 	{
 		Name:        "lrat",
@@ -86,6 +89,11 @@ func Init(root string, d Domain) error {
 			return err
 		}
 	}
+	if d.NegativeTests {
+		if err := writeNegativeTests(root); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -119,7 +127,16 @@ func writeTemplate(root, dst, src string) error {
 	return nil
 }
 
-// writeBridge reads src from the embedded bridge FS and writes it to
+// writeNegativeTests writes the generic tamper test templates to <root>/tests/negative/.
+func writeNegativeTests(root string) error {
+	for _, name := range []string{"conftest.py", "test_tamper_basic.py"} {
+		if err := writeTemplate(root, filepath.Join("tests", "negative", name),
+			filepath.Join("templates", "negative", name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 // <root>/adapters/bridge.py with mode 0755 (executable).
 // No-ops if the destination already exists.
 func writeBridge(root, src string) error {

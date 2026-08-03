@@ -9,95 +9,122 @@ proofctl 成为数学证明类项目的通用认证基础设施平台。数学�
 
 框架提供其余一切：DAG 管理、内容寻址存储、attestation 链、freshness 追踪、release gate、STATUS.json。
 
-**阶段目标：** 先全面支持 weil-class（Python checker + JSON 证书 + 区间算术），再向外拓展。
-
 ---
 
 ## 范围说明
 
 - proofctl 是**认证基础设施**，不做数学推导
-- "最少代码接入"指：新数学证明项目只需提供 checker 可执行文件 + graph.json + policy.json
-- weil-lower-bound 是第一个参考域实现，其经验（D-defect 体系、certificate v2 格式、gate 测试模式）已被吸收进框架
-- 当前第一个目标域是 weil-class；未来可拓展到其他数学证明类项目，不局限于 Riemann 相关问题
+- weil-lower-bound 是第一个参考域实现
+- 当前第一个目标域是 weil-class；未来可拓展
 
 ---
 
 ## Milestone 1 — 核心通用化 ✅
 
-目标：消除所有 Weil 硬编码，让 release gate 对任意领域可配置。
-
-### T1：release conditions 数据驱动化 ✅
-
-- `policy.ReleasePolicy` 新增 `required_metadata_keys []string`
-- `EvaluateConditions` 中原 C04–C12 Weil 专名常量全部删除，改为遍历 `RequiredMetadataKeys` 动态生成 `meta:<key>` 条件
-- C01（全局状态）/ C02（无 assumption）/ C03（assurance 合规）/ C04（replay 一致性）保持为通用固定条件
-- `policies/weil-release-v1.json` 新增 9 个 metadata key 声明
-
-### T2：`proofctl init` 去除默认 policy 硬编码 ✅
-
-- `config.Init()` 签名加入 `policyFile string` 参数，默认空字符串
-- `proofctl init` 新增 `--policy <path>` 和 `--domain <name>` flag
-
-### T3：`ReleaseStatus` 字段去 Weil 化 ✅
-
-- `CertifiedRadius` → `ReleaseTarget`（`json:"release_target"`）
-- STATUS.json 对所有领域语义正确
-
----
+- T1: release conditions 数据驱动化 ✅
+- T2: proofctl init 去除默认 policy 硬编码 ✅
+- T3: ReleaseStatus 字段去 Weil 化 ✅
 
 ## Milestone 2 — CAP 领域支持 ✅
 
-目标：让 weil-lower-bound 的 checker 能被 proofctl 直接驱动。
-
-### T4：CAP checker 协议桥接器 ✅
-
-新增 `adapters/cap/bridge.py`（Python stdlib only）：
-- stdin 读 `CheckerInput` JSON → 调用 `BRIDGE_CHECKER <cert.json>` → stdout 写 `CheckerOutput` JSON
-- exit 0 时从证书读取 `cap_format_version`、`margin_ratio`，从 claim_id 推断 odd/even sector，填充所有 metadata keys
-- bridge 不做数学验证，只做协议翻译，永远 stdlib only
-
-### T5：weil-lower-bound proofctl 集成文件 ✅
-
-写入 weil-lower-bound 仓库：
-- `graph.json`：12 claim DAG（D1–D10、D18 + def-frozen-model），含 SHA-256 evidence 引用
-- `policies/weil-cap-v1.json`：12 required_claims + 9 required_metadata_keys
-- `.proofctl/config.json`：指向 weil-cap-v1.json
-
-### T6：端到端验证 ✅
-
-- `proofctl status`：12 claim OPEN，DAG 拓扑正确
-- `proofctl graph`：依赖关系完整
-- `proofctl release --dry-run`：4 通用条件 + 9 metadata 条件全部数据驱动，fail-closed 正常工作
-
----
+- T4: CAP checker 协议桥接器 ✅
+- T5: weil-lower-bound proofctl 集成文件 ✅
+- T6: 端到端验证 ✅
 
 ## Milestone 3 — 平台脚手架 ✅
 
-### T7：`proofctl init --domain cap` 脚手架命令 ✅
+- T7: proofctl init --domain cap ✅
+- T8: proofctl domains list ✅
 
-`internal/scaffold/` 包（Go embed 内嵌所有模板和 bridge.py）：
-- `--domain cap`：生成 `graph.json`（占位 claim）、`policies/cap-v1.json`（含 required_metadata_keys）、`adapters/bridge.py`（可直接运行）
-- config.json 自动填好 `policy_file`
-- 模板开箱即可 `proofctl compile --adapter json graph.json`
+---
 
-### T8：`proofctl domains list` ✅
+## Milestone 4 — 吸收 weil 经验，消除手动文件
 
-列出所有内置领域（cap / lrat / qmd）及其 bridge、policy、graph 模板状态。
+目标：weil-lower-bound 不再需要手写 STATUS.json 和 release-manifest.json；
+平台提供 replay、negative test、env 管理能力，所有 CAP 类项目受益。
+
+### T9：STATUS.json 字段增强
+
+**问题：** weil 维护自己的 STATUS.json（`certified_radius`、`gates`、`as_of`），
+与 proofctl 写出的 STATUS.json 并存，语义重叠，手动维护。
+
+**改造：**
+- `ReleaseStatus` 新增 `AsOf string json:"as_of"`（release 时间，RFC3339 date）
+- `ReleaseStatus` 新增 `ClaimSummary json:"claim_summary"`
+  （`accepted/blocked/open/rejected` 计数，替代 weil gates 的人工汇总）
+- 目标：weil-lower-bound 可以删除手写 STATUS.json，用 proofctl 的代替
+
+### T10：release-manifest.json 自动生成
+
+**问题：** weil 手写 release-manifest.json（证书路径、SHA-256、checker_exit、margin_ratio），
+这些数据全部来自 attestation.Metadata，完全可以自动生成。
+
+**改造：**
+- `Gate` 新增 `ProjectRoot string` 字段
+- `Gate.Release()` 成功后自动写出 `<project-root>/release-manifest.json`
+- 内容从 attestation.Metadata 提取（cap_format_version、pivot_radius_ratio 等）
+  + Evidence 的 path_hint 和 digest
+- `proofctl release --dry-run` 不写 manifest，只预览内容
+
+### T11：proofctl replay 子命令
+
+**问题：** weil 有 `scripts/replay_030.py`（D15 deliverable）：冷启动子进程重新生成
++ 独立验证证书，是最强的完整性保证。这个模式对所有 CAP 类项目都适用，
+目前 proofctl 没有对应能力（verify 只调用 checker，不调用 generator）。
+
+**改造：** 新增 `proofctl replay` 子命令：
+```
+proofctl replay \
+  --generator "python -m src.generate_certificate --a 3/10 --sector odd --out {cert}" \
+  --cert-out /tmp/cert-replay.json \
+  <evidence-digest>
+```
+- 用 `{cert}` 占位符替换为实际临时路径
+- 步骤：① 运行 generator → ② 计算 SHA-256 与 evidence digest 对比 → ③ 通过 bridge 调用 checker → ④ 记录 cold_replay_date
+- 写出 replay attestation（assurance: `exact-replay`）
+- 输出 replay report（digest 匹配结果、checker exit、时间）
+
+### T12：negative test 脚手架
+
+**问题：** weil 有完整的 `tests/negative/`（17 个篡改测试 + 结构拒绝测试），
+是"checker 必须拒绝这些输入"的验证套件。对任何 CAP 域都是必要的，
+目前 `proofctl init --domain cap` 不生成测试目录。
+
+**改造：**
+- `internal/scaffold/templates/negative/` 新增三个测试模板：
+  - `test_tamper_basic.py`：5 个通用篡改用例（修改 conclusion、删除必需字段、注入未知字段、版本号错误、空 witnesses）
+  - `conftest.py`：pytest fixture（从 `certificates/` 目录找证书）
+  - `README.md`：说明如何运行和扩展
+- `scaffold.go` 的 cap 域入口写出 `tests/negative/` 目录
+
+### T13：proofctl env 子命令
+
+**问题：** weil 的 `environment.lock` 固定了 Python 版本、python-flint 版本、flint 版本
+和 OCI digest，但没有工具自动验证运行环境是否符合 lock。
+CAP 类项目的 checker 可重现性依赖于精确的运行时环境。
+
+**改造：** 新增 `proofctl env` 子命令：
+- `proofctl env verify --lock environment.lock`：读取 lock 文件，检查当前 Python
+  版本和关键包版本是否匹配，输出 PASS/FAIL 报告
+- `proofctl env snapshot --checker python3 --out environment.lock`：
+  自动抓取当前 Python 版本 + `pip freeze`，生成 lock 文件模板
 
 ---
 
 ## 关键设计约束
 
-1. **checker 独立性不变：** bridge.py 是协议翻译层，绝不引入 generator 侧代码，永远 stdlib only
-2. **核心零领域知识：** `internal/` 下所有包继续零 Weil 依赖；Weil 知识只在 `adapters/weil/` 和 `internal/weil/`
-3. **向后兼容：** 已有 `weil-release-v1.json` 用户只需添加 `required_metadata_keys` 字段即可升级
-4. **fail-closed 不变：** release gate 逻辑不松动
+1. **checker 独立性不变：** bridge.py 是协议翻译层，绝不引入 generator 侧代码
+2. **核心零领域知识：** `internal/` 下所有包继续零 Weil 依赖
+3. **fail-closed 不变：** release gate 逻辑不松动
 
 ---
 
-## 下一步（未规划）
+## 任务顺序（依赖关系）
 
-- 为 lrat / qmd 补充 policy 模板和 graph 模板，完善 `domains list`
-- `proofctl verify` 驱动 bridge.py 完成实际 attestation 写入（当前 weil-lower-bound 仍需手动写 attestation）
-- LICENSE 升级为 Apache 2.0 + CITATION.cff（学术引用格式）
-- weil-lower-bound 的 `proofctl verify @thm-main-radius-030` 全流程打通
+```
+T9  (STATUS.json 增强)     ──→ 可并行
+T10 (manifest 自动生成)    ──→ 依赖 T9（需要 ProjectRoot 字段）
+T12 (negative test 脚手架) ──→ 可并行（纯模板，零 Go 改动）
+T11 (proofctl replay)      ──→ T10 后（复用 manifest 结构）
+T13 (proofctl env)         ──→ 独立，最后做
+```

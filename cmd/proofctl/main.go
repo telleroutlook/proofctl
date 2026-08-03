@@ -4,6 +4,8 @@
 //
 //	init      Initialize a new proof graph project (--domain cap|lrat|qmd for scaffolding)
 //	domains   List known domains (proofctl domains list)
+//	env       Manage checker runtime environment (verify|snapshot)
+//	replay    Cold-start generator+checker replay for a claim
 //	compile   Compile a proof source file to ProofGraph IR
 //	check     Run checkers for one or more claims
 //	verify    Verify attestation integrity
@@ -68,6 +70,10 @@ func main() {
 		cmdCache(subargs, *jsonFlag)
 	case "domains":
 		cmdDomains(subargs, *jsonFlag)
+	case "env":
+		cmdEnv(subargs, *jsonFlag)
+	case "replay":
+		cmdReplay(subargs, *jsonFlag)
 	case "release":
 		cmdRelease(subargs, *jsonFlag)
 	case "status":

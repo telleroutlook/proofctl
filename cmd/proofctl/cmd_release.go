@@ -24,7 +24,13 @@ func cmdRelease(args []string, useJSON bool) {
 	polPath := filepath.Join(root, cfg.PolicyFile)
 	pol := loadPolicy(polPath, useJSON)
 
-	gate := &release.Gate{OutputDir: filepath.Join(root, config.DirName)}
+	gate := &release.Gate{
+		OutputDir:   filepath.Join(root, config.DirName),
+		ProjectRoot: root,
+	}
+
+	// Load raw graph to access evidence descriptors for manifest generation.
+	rawPG := loadRawGraph(root, useJSON)
 
 	type conditionEntry struct {
 		ID      string `json:"id"`
@@ -93,7 +99,7 @@ func cmdRelease(args []string, useJSON bool) {
 		return
 	}
 
-	pass, blockers, err := gate.Release(g, attestations, pol)
+	pass, blockers, err := gate.Release(g, attestations, pol, rawPG.Evidence)
 	if err != nil {
 		die(useJSON, errors.CodeInternalError, err.Error())
 	}
