@@ -51,10 +51,21 @@ The core engine (`internal/`) has zero domain knowledge. Domain specifics live i
 - The 12-claim DAG mirrors `internal/weil/defects.go` — if defects.go changes,
   update weil-lower-bound/graph.json accordingly
 - `BRIDGE_CHECKER` for weil: `python3 checker/check_certificate.py`
+- checker `cmd` in graph.json uses `${PROOFCTL_ADAPTERS}/cap/bridge.py` — never
+  absolute paths; `NativeRunner.resolveCmdPaths()` expands `${VAR}` at runtime
 
-## What NOT to do
+## replay conventions
 
-- Do not hardcode Weil claim IDs, metadata keys, or D-numbers in `internal/release/`
-- Do not add domain-specific `if domain == "weil"` branches anywhere in `internal/`
-- Do not change `bridge.py` to import non-stdlib modules
+- Single-evidence: `proofctl replay --claim <id> --generator "cmd {cert}" <digest>`
+- Multi-evidence: `--evidence <digest> --generator <cmd>` repeated in pairs; all
+  must pass before one attestation is written
+- Never call `proofctl replay` twice for the same claim to work around the
+  single-attestation-per-claim design — use multi-evidence pairs instead
+
+## release output files
+
+- `.proofctl/STATUS.json` — written by `proofctl release` (always, pass or fail)
+- `.proofctl/release-snapshot.json` — written by `proofctl release` on pass only;
+  contains per-evidence metadata; consumer repos should read this instead of
+  maintaining their own STATUS.json
 - Do not write `certified_radius` anywhere — the field is `release_target`

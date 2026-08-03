@@ -30,7 +30,11 @@ The `weil-lower-bound` repository is the first reference implementation. Its
 in place. From the `weil-lower-bound` directory:
 
 ```bash
-proofctl status          # shows 12 claims OPEN
+# PROOFCTL_ADAPTERS must point to the adapters/ directory of a proofctl checkout.
+# The env var is expanded in graph.json checker cmd entries at runtime.
+export PROOFCTL_ADAPTERS=/path/to/proofctl/adapters
+
+proofctl status          # shows 12 claims, 7 accepted
 proofctl graph           # shows full DAG
 proofctl release --dry-run   # lists all unmet conditions
 ```
@@ -60,7 +64,7 @@ Requires Go 1.22 or later.
 ## Project Layout
 
 ```
-cmd/proofctl/          CLI entry point (13 subcommands)
+cmd/proofctl/          CLI entry point (14 subcommands)
 internal/
   ir/                  Intermediate representation types and strict decoder
   dag/                 Claim DAG (validation, closure, impact, frontier)
@@ -71,7 +75,7 @@ internal/
   policy/              Release policy evaluation (required_claims, assurances, metadata keys)
   attestation/         Attestation combination and self-digest
   status/              Global status projection over the claim graph
-  release/             Release gate (dry-run + atomic STATUS.json write, 4 universal conditions)
+  release/             Release gate (dry-run + atomic STATUS.json write + release-snapshot.json, 4 universal conditions)
   snapshot/            Point-in-time immutable graph snapshots
   compile/             Source compiler (JSON → ProofGraph IR)
   config/              .proofctl project directory management
@@ -123,6 +127,57 @@ Every `proofctl release` evaluates:
 | `C03-assurances-allowed` | All assurances pass policy | Universal |
 | `C04-replay-consistency` | All attestations have freshness/digest | Universal |
 | `meta:<key>` × N | Each `required_metadata_keys` entry present | Domain-specific |
+
+## Cold-Start Replay
+
+`proofctl replay` re-runs the certificate generator from scratch, hashes the output,
+compares it against the pinned evidence digest, and runs the checker — writing an
+`exact-replay` attestation only when all checks pass.
+
+Single evidence (backward compatible):
+```bash
+proofctl replay \
+  --claim thm-my-theorem \
+  --generator "python -m src.generate --out {cert}" \
+  sha256:<expected-digest>
+```
+
+Multi-evidence (one `--evidence`/`--generator` pair per certificate — for proofs
+with multiple independent sectors or parameter values):
+```bash
+BRIDGE_CHECKER="python3 checker/check_certificate.py" \
+proofctl replay \
+  --claim thm-main-radius-030 \
+  --evidence sha256:<odd-digest>  --generator "python -m src.gen --sector odd  --out {cert}" \
+  --evidence sha256:<even-digest> --generator "python -m src.gen --sector even --out {cert}"
+```
+
+All evidence items must pass (digest match + checker exit 0) before a single
+`exact-replay` attestation is written to `.proofctl/attestations/<claim-id>-replay.json`.
+
+## Release Snapshot
+
+On a successful `proofctl release`, in addition to `.proofctl/STATUS.json`,
+proofctl writes `.proofctl/release-snapshot.json` with richer per-evidence metadata
+aggregated from checker attestations:
+
+```json
+{
+  "release_target": "thm-main-radius-030",
+  "generated": "2026-08-03",
+  "claim_summary": { "accepted": 12, "open": 0, ... },
+  "evidence": [
+    {
+      "digest": "sha256:de3e...",
+      "path_hint": "certificates/030/primary/odd.json",
+      "metadata": { "ldlt_passes": "true", "pivot_radius_ratio": "3.3e8", ... }
+    }
+  ]
+}
+```
+
+This file is machine-readable and can replace hand-maintained status files in
+consumer repositories.
 
 ## License
 
