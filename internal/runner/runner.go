@@ -207,7 +207,11 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 		return len(p), nil // silently discard
 	}
 	if len(p) > remaining {
-		p = p[:remaining]
+		// Write only up to the limit; report full len(p) to satisfy io.Writer contract.
+		if _, err := b.Buffer.Write(p[:remaining]); err != nil {
+			return 0, err
+		}
+		return len(p), nil
 	}
 	return b.Buffer.Write(p)
 }

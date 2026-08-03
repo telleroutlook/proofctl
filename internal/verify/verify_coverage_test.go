@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,9 +11,136 @@ import (
 
 	"github.com/telleroutlook/proofctl/internal/cas"
 	"github.com/telleroutlook/proofctl/internal/ir"
+	"github.com/telleroutlook/proofctl/internal/runner"
 )
 
-// TestLoadCachedAttestation_CorruptedJSON checks that a corrupted attestation file
+// TestWriteAttestationAtomic_InvalidClaimID verifies that writeAttestationAtomic
+// returns an error immediately for an invalid claim ID (path traversal guard).
+func TestWriteAttestationAtomic_InvalidClaimID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	att := &ir.Attestation{ClaimID: "../escaped"}
+	err := writeAttestationAtomic(dir, "../escaped", att)
+	if err == nil {
+		t.Fatal("expected error for invalid claim ID, got nil")
+	}
+}
+
+// TestWriteAttestationAtomic_ReadOnlyDir verifies that writeAttestationAtomic
+// returns an error when the attestation directory cannot be created.
+func TestWriteAttestationAtomic_ReadOnlyDir(t *testing.T) {
+	t.Parallel()
+	if os.Getuid() == 0 {
+		t.Skip("running as root — permission checks are bypassed")
+	}
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Skipf("cannot chmod: %v", err)
+	}
+	defer func() { _ = os.Chmod(parent, 0o755) }()
+
+	att := &ir.Attestation{ClaimID: "claim-1"}
+	err := writeAttestationAtomic(filepath.Join(parent, "attest"), "claim-1", att)
+	if err == nil {
+		t.Fatal("expected error writing to read-only parent dir, got nil")
+	}
+}
+
+// TestParseCheckerOutput_MissingOutcome verifies that an output JSON with no
+// "outcome" field is rejected.
+func TestParseCheckerOutput_MissingOutcome(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"protocol_version":1,"claim_id":"c1"}`)
+	_, err := parseCheckerOutput(data)
+	if err == nil {
+		t.Fatal("expected error for missing outcome, got nil")
+	}
+}
+
+// TestParseCheckerOutput_NonJSONObject verifies that non-JSON output is rejected.
+func TestParseCheckerOutput_NonJSONObject(t *testing.T) {
+	t.Parallel()
+	_, err := parseCheckerOutput([]byte(`not json`))
+	if err == nil {
+		t.Fatal("expected error for non-JSON output, got nil")
+	}
+}
+
+// TestTryParseCheckerOutput_InvalidReturnsNil verifies that tryParseCheckerOutput
+// returns nil (not a panic) for invalid input.
+func TestTryParseCheckerOutput_InvalidReturnsNil(t *testing.T) {
+	t.Parallel()
+	if got := tryParseCheckerOutput([]byte(`bad`)); got != nil {
+		t.Errorf("expected nil for invalid input, got %+v", got)
+	}
+	if got := tryParseCheckerOutput(nil); got != nil {
+		t.Errorf("expected nil for nil input, got %+v", got)
+	}
+}
+
+// TestIsRunError_NonRunError verifies that isRunError returns false for a
+// non-*RunError error type.
+func TestIsRunError_NonRunError(t *testing.T) {
+	t.Parallel()
+	var target *runner.RunError
+	if isRunError(fmt.Errorf("plain error"), &target) {
+		t.Error("expected false for plain error, got true")
+	}
+	if target != nil {
+		t.Error("target should remain nil")
+	}
+}
+
+// TestProtocolErrorPath exercises the ExitProtocolError branch in Pipeline.Run.
+func TestProtocolErrorPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store, desc, _ := makeTestCAS(t)
+	g := makeTestDAG("claim-1")
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+
+	p := &Pipeline{
+		DAG:       g,
+		CAS:       store,
+		AttestDir: filepath.Join(dir, "attestations"),
+		Runner: &mockRunner{
+			err: &runner.RunError{Code: runner.ExitProtocolError, Stderr: "bad protocol"},
+		},
+	}
+
+	_, err := p.Run(context.Background(), "claim-1", checkerID, []ir.EvidenceDescriptor{desc}, "")
+	if err == nil {
+		t.Fatal("expected error for protocol error, got nil")
+	}
+	if !strings.Contains(err.Error(), "CHECKER_FAILED") {
+		t.Errorf("expected CHECKER_FAILED in error, got: %v", err)
+	}
+}
+
+// TestUnknownExitCodePath exercises the default (unexpected exit code) branch.
+func TestUnknownExitCodePath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store, desc, _ := makeTestCAS(t)
+	g := makeTestDAG("claim-1")
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+
+	p := &Pipeline{
+		DAG:       g,
+		CAS:       store,
+		AttestDir: filepath.Join(dir, "attestations"),
+		// Code 99 is not ExitFail/Unavailable/ProtocolError → default branch
+		Runner: &mockRunner{
+			err: &runner.RunError{Code: 99, Stderr: "unexpected"},
+		},
+	}
+
+	_, err := p.Run(context.Background(), "claim-1", checkerID, []ir.EvidenceDescriptor{desc}, "")
+	if err == nil {
+		t.Fatal("expected error for unknown exit code, got nil")
+	}
+}
+
 // causes loadCachedAttestation to return an error, not a panic.
 func TestLoadCachedAttestation_CorruptedJSON(t *testing.T) {
 	t.Parallel()

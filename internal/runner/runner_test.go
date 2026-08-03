@@ -278,7 +278,89 @@ func TestNativeRunner_CheckerFail(t *testing.T) {
 	}
 }
 
-// isRunError attempts to type-assert err to *RunError.
+// ── RunError method coverage ──────────────────────────────────────────────────
+
+func TestRunError_Methods(t *testing.T) {
+	t.Parallel()
+
+	fail := &RunError{Code: ExitFail, Stderr: "fail", Wrapped: fmt.Errorf("inner")}
+	if !fail.IsCheckerFail() {
+		t.Error("IsCheckerFail should be true for ExitFail")
+	}
+	if fail.IsUnavailable() {
+		t.Error("IsUnavailable should be false for ExitFail")
+	}
+	if fail.IsProtocolError() {
+		t.Error("IsProtocolError should be false for ExitFail")
+	}
+	if fail.Unwrap() == nil {
+		t.Error("Unwrap should return the wrapped error")
+	}
+
+	unavail := &RunError{Code: ExitUnavailable}
+	if !unavail.IsUnavailable() {
+		t.Error("IsUnavailable should be true for ExitUnavailable")
+	}
+
+	proto := &RunError{Code: ExitProtocolError}
+	if !proto.IsProtocolError() {
+		t.Error("IsProtocolError should be true for ExitProtocolError")
+	}
+}
+
+func TestRunError_ErrorString_WithStederr(t *testing.T) {
+	t.Parallel()
+	e := &RunError{Code: ExitFail, Stderr: "assertion failed"}
+	s := e.Error()
+	if !strings.Contains(s, "assertion failed") {
+		t.Errorf("Error() = %q, want stderr present", s)
+	}
+}
+
+func TestRunError_ErrorString_NoStederr(t *testing.T) {
+	t.Parallel()
+	e := &RunError{Code: ExitUnavailable}
+	s := e.Error()
+	if s == "" {
+		t.Error("Error() should not be empty")
+	}
+}
+
+// ── limitedBuffer Write coverage ──────────────────────────────────────────────
+
+func TestLimitedBuffer_TruncatesAtLimit(t *testing.T) {
+	t.Parallel()
+	var buf limitedBuffer
+	buf.limit = 4
+	n, err := buf.Write([]byte("hello"))
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("Write returned %d, want 5 (reported length of input)", n)
+	}
+	if buf.Len() != 4 {
+		t.Errorf("buffer length = %d, want 4", buf.Len())
+	}
+}
+
+func TestLimitedBuffer_DiscardsBeyondLimit(t *testing.T) {
+	t.Parallel()
+	var buf limitedBuffer
+	buf.limit = 3
+	_, _ = buf.Write([]byte("abc"))
+	n, err := buf.Write([]byte("more data"))
+	if err != nil {
+		t.Fatalf("Write after limit: %v", err)
+	}
+	// Should silently discard — returns length of input as if written
+	if n != len("more data") {
+		t.Errorf("Write returned %d, want %d", n, len("more data"))
+	}
+	if buf.Len() != 3 {
+		t.Errorf("buffer should stay at 3, got %d", buf.Len())
+	}
+}
 func isRunError(err error, dst **RunError) bool {
 	re, ok := err.(*RunError)
 	if ok {

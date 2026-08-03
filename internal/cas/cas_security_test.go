@@ -244,6 +244,64 @@ func TestAdversarial_SymlinkEscape(t *testing.T) {
 	}
 }
 
+// TestStore_IOError verifies that Store handles a write error from the temp file
+// by returning an error and cleaning up the temp file.
+func TestStore_IOError(t *testing.T) {
+	t.Parallel()
+	// Create a store in a read-only directory to force temp-file creation failure.
+	dir := t.TempDir()
+	s, err := cas.New(filepath.Join(dir, "cas"))
+	if err != nil {
+		t.Fatalf("cas.New: %v", err)
+	}
+
+	// Make the CAS root read-only so CreateTemp fails.
+	if err := os.Chmod(filepath.Join(dir, "cas"), 0o555); err != nil {
+		t.Skipf("cannot chmod temp dir (possibly not supported): %v", err)
+	}
+	defer func() { _ = os.Chmod(filepath.Join(dir, "cas"), 0o755) }()
+
+	_, _, err = s.Store(bytes.NewReader([]byte("data")))
+	if err == nil {
+		t.Error("expected error storing to read-only CAS root, got nil")
+	}
+}
+
+// TestVerify_SymlinkEscape checks that Verify also blocks symlink escapes.
+func TestVerify_SymlinkEscape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sensitiveDir := t.TempDir()
+	sensitiveFile := filepath.Join(sensitiveDir, "sensitive.txt")
+	if err := os.WriteFile(sensitiveFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write sensitive file: %v", err)
+	}
+
+	s, err := cas.New(filepath.Join(dir, "cas"))
+	if err != nil {
+		t.Fatalf("cas.New: %v", err)
+	}
+
+	content := []byte("legit")
+	digest, size, err := s.Store(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	hexPart := strings.TrimPrefix(digest, "sha256:")
+	blobDir := filepath.Join(dir, "cas", "sha256", hexPart[:2])
+	symlinkName := strings.Repeat("a", 62)
+	if err := os.Symlink(sensitiveFile, filepath.Join(blobDir, symlinkName)); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	crafted := "sha256:" + hexPart[:2] + strings.Repeat("a", 62)
+	desc := ir.EvidenceDescriptor{Digest: crafted, Size: size}
+	if err := s.Verify(desc); err == nil {
+		t.Fatal("expected error from Verify for symlink escape, got nil")
+	}
+}
+
 // TestAdversarial_ConcurrentStore stores 50 identical blobs concurrently
 // (10 goroutines x 5 stores each). All must succeed, exactly one blob file
 // must be on disk, and no data corruption must occur.

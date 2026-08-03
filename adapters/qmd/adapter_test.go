@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/telleroutlook/proofctl/adapters/qmd"
@@ -277,4 +278,206 @@ func TestVerifyDeterminism_AlwaysPasses(t *testing.T) {
 			t.Errorf("iteration %d: VerifyDeterminism returned unexpected error: %v", i, err)
 		}
 	}
+}
+
+// TestVerifyDeterminism_InvalidJSON verifies that VerifyDeterminism returns an
+// error when the input is not valid Pandoc JSON.
+func TestVerifyDeterminism_InvalidJSON(t *testing.T) {
+	a := qmd.DefaultAdapter()
+	if err := a.VerifyDeterminism([]byte(`{bad json}`)); err == nil {
+		t.Error("expected error for invalid JSON, got nil")
+	}
+}
+
+// TestCompile_InvalidJSON verifies that Compile returns an error for malformed JSON.
+func TestCompile_InvalidJSON(t *testing.T) {
+	a := qmd.DefaultAdapter()
+	_, err := a.Compile([]byte(`{not valid}`))
+	if err == nil {
+		t.Error("expected error for invalid JSON, got nil")
+	}
+}
+
+// TestCompile_InlineCodeAndMath verifies that Code and Math inline nodes are
+// extracted as statement text.
+func TestCompile_InlineCodeAndMath(t *testing.T) {
+	src := []byte(`{
+		"pandoc-api-version": [1, 23, 1],
+		"meta": {},
+		"blocks": [
+			{
+				"t": "Div",
+				"c": [
+					["lem-inline", ["claim"], []],
+					[{"t": "Para", "c": [
+						{"t": "Str", "c": "Let "},
+						{"t": "Code", "c": [["", [], []], "f(x)"]},
+						{"t": "Space"},
+						{"t": "Str", "c": "and "},
+						{"t": "Math", "c": [{"t": "InlineMath"}, "x^2"]},
+						{"t": "SoftBreak"},
+						{"t": "Str", "c": "end."}
+					]}]
+				]
+			}
+		]
+	}`)
+	a := qmd.DefaultAdapter()
+	pg, err := a.Compile(src)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(pg.Claims) != 1 {
+		t.Fatalf("expected 1 claim, got %d", len(pg.Claims))
+	}
+	text := pg.Claims[0].Statement.Text
+	if text == "" {
+		t.Error("expected non-empty statement text from Code/Math inlines")
+	}
+	// Should contain the code snippet, math, and surrounding text.
+	for _, want := range []string{"f(x)", "x^2", "end."} {
+		if !containsStr(text, want) {
+			t.Errorf("statement text %q missing %q", text, want)
+		}
+	}
+}
+
+// TestCompile_LineBreak verifies that LineBreak inline is treated as a space.
+func TestCompile_LineBreak(t *testing.T) {
+	src := []byte(`{
+		"pandoc-api-version": [1, 23, 1],
+		"meta": {},
+		"blocks": [
+			{
+				"t": "Div",
+				"c": [
+					["lem-lb", ["claim"], []],
+					[{"t": "Para", "c": [
+						{"t": "Str", "c": "first"},
+						{"t": "LineBreak"},
+						{"t": "Str", "c": "second"}
+					]}]
+				]
+			}
+		]
+	}`)
+	a := qmd.DefaultAdapter()
+	pg, err := a.Compile(src)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(pg.Claims) != 1 {
+		t.Fatalf("expected 1 claim, got %d", len(pg.Claims))
+	}
+	text := pg.Claims[0].Statement.Text
+	if !containsStr(text, "first") || !containsStr(text, "second") {
+		t.Errorf("LineBreak: statement %q missing expected words", text)
+	}
+}
+
+// TestCompile_NonClaimDivIgnored verifies that a Div without class "claim"
+// produces no claims (but also no error).
+func TestCompile_NonClaimDivIgnored(t *testing.T) {
+	src := []byte(`{
+		"pandoc-api-version": [1, 23, 1],
+		"meta": {},
+		"blocks": [
+			{
+				"t": "Div",
+				"c": [
+					["some-id", ["note"], []],
+					[{"t": "Para", "c": [{"t": "Str", "c": "Not a claim."}]}]
+				]
+			}
+		]
+	}`)
+	a := qmd.DefaultAdapter()
+	pg, err := a.Compile(src)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(pg.Claims) != 0 {
+		t.Errorf("expected 0 claims for non-claim div, got %d", len(pg.Claims))
+	}
+}
+
+// TestCompile_MalformedDivContent verifies that a Div with malformed content
+// returns an error.
+func TestCompile_MalformedDivContent(t *testing.T) {
+	// Div whose "c" is not a [Attr, [Block]] pair
+	src := []byte(`{
+		"pandoc-api-version": [1, 23, 1],
+		"meta": {},
+		"blocks": [{"t": "Div", "c": "not-an-array"}]
+	}`)
+	a := qmd.DefaultAdapter()
+	_, err := a.Compile(src)
+	if err == nil {
+		t.Error("expected error for malformed Div content, got nil")
+	}
+}
+
+// TestCompile_RequiredAssurance verifies that required-assurance KV is parsed.
+func TestCompile_RequiredAssurance(t *testing.T) {
+	src := []byte(`{
+		"pandoc-api-version": [1, 23, 1],
+		"meta": {},
+		"blocks": [
+			{
+				"t": "Div",
+				"c": [
+					["lem-ra", ["claim"], [
+						["kind", "lemma"],
+						["required-assurance", "formal-kernel, deterministic-cap"]
+					]],
+					[{"t": "Para", "c": [{"t": "Str", "c": "Some text."}]}]
+				]
+			}
+		]
+	}`)
+	a := qmd.DefaultAdapter()
+	pg, err := a.Compile(src)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(pg.Claims) != 1 {
+		t.Fatalf("expected 1 claim, got %d", len(pg.Claims))
+	}
+	c := pg.Claims[0]
+	if len(c.RequiredAssurance) != 2 {
+		t.Errorf("expected 2 required assurances, got %v", c.RequiredAssurance)
+	}
+}
+
+// TestCompile_NoPara verifies that a claim Div with no Para block produces an
+// empty statement text (not an error).
+func TestCompile_NoPara(t *testing.T) {
+	src := []byte(`{
+		"pandoc-api-version": [1, 23, 1],
+		"meta": {},
+		"blocks": [
+			{
+				"t": "Div",
+				"c": [
+					["lem-nopara", ["claim"], []],
+					[]
+				]
+			}
+		]
+	}`)
+	a := qmd.DefaultAdapter()
+	pg, err := a.Compile(src)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(pg.Claims) != 1 {
+		t.Fatalf("expected 1 claim, got %d", len(pg.Claims))
+	}
+	if pg.Claims[0].Statement.Text != "" {
+		t.Errorf("expected empty text for claim with no Para, got %q", pg.Claims[0].Statement.Text)
+	}
+}
+
+func containsStr(s, sub string) bool {
+	return strings.Contains(s, sub)
 }

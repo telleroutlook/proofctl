@@ -164,7 +164,98 @@ func TestWrite_CreatesFile(t *testing.T) {
 	}
 }
 
-// TestWrite_Idempotent verifies that writing the same snapshot twice produces the same filename.
+// TestWrite_ReadOnlyDir verifies that Write returns an error when the target
+// directory cannot be created (permission denied).
+func TestWrite_ReadOnlyDir(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — permission checks are bypassed")
+	}
+	parent := t.TempDir()
+	// Make parent read-only so MkdirAll inside Write fails.
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Skipf("cannot chmod: %v", err)
+	}
+	defer func() { _ = os.Chmod(parent, 0o755) }()
+
+	targetDir := filepath.Join(parent, "snapshots")
+	claims := makeClaims("c1")
+	atts := makeAttestations("c1")
+	statuses := map[string]ir.Status{"c1": ir.StatusAccepted}
+
+	snap, err := snapshot.Take(claims, atts, statuses, testTime)
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	_, err = snapshot.Write(snap, targetDir)
+	if err == nil {
+		t.Error("expected error writing to read-only parent dir, got nil")
+	}
+}
+
+// TestWrite_EmptySnapshot verifies that a snapshot with no claims can be written.
+func TestWrite_EmptySnapshot(t *testing.T) {
+	dir := t.TempDir()
+	snap, err := snapshot.Take(nil, nil, nil, testTime)
+	if err != nil {
+		t.Fatalf("Take empty: %v", err)
+	}
+	path, err := snapshot.Write(snap, dir)
+	if err != nil {
+		t.Fatalf("Write empty: %v", err)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Errorf("file not found: %v", statErr)
+	}
+}
+
+// TestWrite_CreateTempFails verifies that Write returns an error when the
+// target directory is not writable (CreateTemp fails).
+func TestWrite_CreateTempFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — permission checks are bypassed")
+	}
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "snaps")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Chmod(targetDir, 0o555); err != nil {
+		t.Skipf("cannot chmod: %v", err)
+	}
+	defer func() { _ = os.Chmod(targetDir, 0o755) }()
+
+	snap, err := snapshot.Take(makeClaims("c1"), makeAttestations("c1"),
+		map[string]ir.Status{"c1": ir.StatusAccepted}, testTime)
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	_, err = snapshot.Write(snap, targetDir)
+	if err == nil {
+		t.Error("expected error when CreateTemp fails (read-only dir), got nil")
+	}
+}
+
+// TestWrite_RenameFails verifies that Write returns an error when os.Rename
+// cannot overwrite the destination (a directory already occupies the target path).
+func TestWrite_RenameFails(t *testing.T) {
+	dir := t.TempDir()
+	snap, err := snapshot.Take(makeClaims("c1"), makeAttestations("c1"),
+		map[string]ir.Status{"c1": ir.StatusAccepted}, testTime)
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	// Pre-create a directory with the exact filename Write would use, so
+	// os.Rename(tmpFile, targetPath) fails with EISDIR.
+	targetName := snap.SelfDigest[7:23] + ".snapshot.json"
+	if err := os.MkdirAll(filepath.Join(dir, targetName), 0o755); err != nil {
+		t.Fatalf("MkdirAll blocker: %v", err)
+	}
+	_, err = snapshot.Write(snap, dir)
+	if err == nil {
+		t.Error("expected error when Rename target is a directory, got nil")
+	}
+}
+
 func TestWrite_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	claims := makeClaims("c1", "c2")
