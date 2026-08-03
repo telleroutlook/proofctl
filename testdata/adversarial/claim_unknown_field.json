@@ -1,0 +1,13 @@
+{
+  "id": "lem-d1-normalization",
+  "kind": "lemma",
+  "statement": {
+    "text": "The normalization step is bounded.",
+    "digest": "sha256:73d9f4a0b81c7a17e0b7f5c3c0e2a1b9d8f6e4c2a0e8b6d4f2c0e8b6d4f2c0aa"
+  },
+  "depends_on": [],
+  "required_assurance": ["formal-kernel"],
+  "evidence": [],
+  "checker_policy": "",
+  "injected_status": "accepted"
+}

@@ -1,0 +1,20 @@
+{
+  "claim_id": "lem-d1-normalization",
+  "statement_digest": "sha256:73d9f4a0b81c7a17e0b7f5c3c0e2a1b9d8f6e4c2a0e8b6d4f2c0e8b6d4f2c0aa",
+  "dependency_digests": [],
+  "evidence": [],
+  "checker": {
+    "id": "ai-reviewer-v1",
+    "protocol_version": 1,
+    "checker_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "schema_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "runtime": {"kind": "native"},
+    "network": "none"
+  },
+  "outcome": "accepted",
+  "assurance": "ai-review",
+  "resources": {"wall_millis": 100, "cpu_millis": 50, "mem_bytes": 1024},
+  "start_freshness": "2024-01-01T00:00:00Z",
+  "end_freshness": "2024-01-01T00:01:00Z",
+  "self_digest": ""
+}

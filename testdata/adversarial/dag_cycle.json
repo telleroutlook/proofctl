@@ -1,0 +1,24 @@
+{
+  "claims": [
+    {
+      "id": "claim-a",
+      "kind": "lemma",
+      "statement": {"text": "Claim A", "digest": "sha256:677f906bfccbdf5119c5f737c82a135c6a91f50568548b0ab5803debdf0e04f2"},
+      "depends_on": ["claim-b"],
+      "required_assurance": [],
+      "evidence": [],
+      "checker_policy": ""
+    },
+    {
+      "id": "claim-b",
+      "kind": "lemma",
+      "statement": {"text": "Claim B", "digest": "sha256:8e71858ebead9bf9752a0b43b564e88aeffb32bded90f46316e57d5fa5dc4b35"},
+      "depends_on": ["claim-a"],
+      "required_assurance": [],
+      "evidence": [],
+      "checker_policy": ""
+    }
+  ],
+  "checkers": [],
+  "evidence": []
+}

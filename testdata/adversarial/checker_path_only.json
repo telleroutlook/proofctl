@@ -1,0 +1,8 @@
+{
+  "id": "lean4-checker-unpinned",
+  "protocol_version": 1,
+  "checker_digest": "",
+  "schema_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "runtime": {"kind": "native"},
+  "network": "none"
+}

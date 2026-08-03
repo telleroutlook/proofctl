@@ -85,6 +85,7 @@ type Attestation struct {
 	StartFreshness    string               `json:"start_freshness"`
 	EndFreshness      string               `json:"end_freshness"`
 	SelfDigest        string               `json:"self_digest"`
+	CacheKey          string               `json:"cache_key,omitempty"`
 }
 
 // ResourceStats captures resource consumption for a single checker invocation.

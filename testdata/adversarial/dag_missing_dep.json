@@ -1,0 +1,15 @@
+{
+  "claims": [
+    {
+      "id": "claim-root",
+      "kind": "lemma",
+      "statement": {"text": "Root claim", "digest": "sha256:677f906bfccbdf5119c5f737c82a135c6a91f50568548b0ab5803debdf0e04f2"},
+      "depends_on": ["claim-nonexistent-dep"],
+      "required_assurance": [],
+      "evidence": [],
+      "checker_policy": ""
+    }
+  ],
+  "checkers": [],
+  "evidence": []
+}

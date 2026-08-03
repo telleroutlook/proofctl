@@ -1,0 +1,31 @@
+{
+  "claims": [
+    {
+      "id": "lem-d4-kernel-bound",
+      "kind": "lemma",
+      "statement": {"text": "The kernel bound holds under standard assumptions.", "digest": "sha256:279e96b4100b443843a8829b518a677b071e6deffa7b6ce586c354d863dd3c16"},
+      "depends_on": [],
+      "required_assurance": ["formal-kernel"],
+      "evidence": ["sha256:279e96b4100b443843a8829b518a677b071e6deffa7b6ce586c354d863dd3c16"],
+      "checker_policy": "strict"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "lean4-checker-v1",
+      "protocol_version": 1,
+      "checker_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "schema_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtime": {"kind": "native", "digest": ""},
+      "network": "none"
+    }
+  ],
+  "evidence": [
+    {
+      "media_type": "application/octet-stream",
+      "digest": "sha256:983d17a2842fdc634ffdbd8f26bce3b2d7edf7561fd421a6c4e83db301454555",
+      "size": 22,
+      "path_hint": "kernel_bound.proof"
+    }
+  ]
+}

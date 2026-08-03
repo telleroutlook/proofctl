@@ -34,22 +34,13 @@ func TestDecodeStrictUnknownField(t *testing.T) {
 	}
 }
 
-// TestDecodeStrictDuplicateKey documents Go's stdlib behavior on duplicate keys.
-// Go's json.Decoder uses the last value for duplicate keys (no error is raised).
-// TODO: implement duplicate key detection
+// TestDecodeStrictDuplicateKey checks that a duplicate key returns an error.
 func TestDecodeStrictDuplicateKey(t *testing.T) {
 	t.Parallel()
-	// Go's encoding/json silently accepts duplicate keys and uses the last value.
 	input := `{"id":"first","id":"second","kind":"lemma","statement":{"text":"","digest":""},"depends_on":[],"required_assurance":[],"evidence":[],"checker_policy":""}`
-	got, err := DecodeStrict[Claim](strings.NewReader(input))
-	// Document actual behavior: no error, last value wins.
-	if err != nil {
-		t.Logf("Note: got unexpected error on duplicate key: %v", err)
-		return
-	}
-	// The last "id" value wins.
-	if got.ID != "second" {
-		t.Errorf("duplicate key: expected last value %q, got %q", "second", got.ID)
+	_, err := DecodeStrict[Claim](strings.NewReader(input))
+	if err == nil {
+		t.Fatal("expected error for duplicate key, got nil")
 	}
 }
 
