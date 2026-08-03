@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/telleroutlook/proofctl/internal/config"
 	errors "github.com/telleroutlook/proofctl/internal/errors"
 )
 
@@ -190,7 +192,66 @@ func cmdEnvSnapshot(args []string, useJSON bool) {
 	fmt.Printf("Run 'proofctl env verify --lock %s' to check the environment.\n", *outFlag)
 }
 
-// pipShowVersion returns the installed version of pkg by running pip show,
+// autoLoadEnv reads .proofctl/env in the nearest project root and sets any
+// KEY=VALUE lines as environment variables, skipping already-set variables.
+// It is called at startup so that BRIDGE_CHECKER, PROOFCTL_ADAPTERS, etc.
+// don't need to be re-exported every session.
+//
+// File format: one KEY=VALUE per line; blank lines and lines starting with #
+// are ignored. Values may optionally be quoted with single or double quotes.
+func autoLoadEnv() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	root, err := findProjectRoot(cwd)
+	if err != nil {
+		return
+	}
+	envFile := filepath.Join(root, config.DirName, "env")
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		return // no env file — silently skip
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexByte(line, '=')
+		if idx < 1 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		// Strip optional surrounding quotes.
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') ||
+			(val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		}
+		// Only set if not already in environment.
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, val)
+		}
+	}
+}
+
+// findProjectRoot walks up from dir looking for .proofctl/.
+// It is a lightweight duplicate of config.Find used here to avoid import cycles.
+func findProjectRoot(dir string) (string, error) {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".proofctl")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no .proofctl found")
+		}
+		dir = parent
+	}
+}
+
 // using the pip binary derived from the checker path.
 // Returns "[pip-error: ...]" if pip cannot be run, so the caller can distinguish
 // a broken pip from a genuinely absent package.

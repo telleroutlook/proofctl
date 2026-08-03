@@ -42,6 +42,9 @@ import (
 var version = "dev"
 
 func main() {
+	// Auto-load .proofctl/env before parsing flags so env vars are available.
+	autoLoadEnv()
+
 	jsonFlag := flag.Bool("json", false, "output in JSON format")
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Usage = usage
@@ -70,6 +73,8 @@ func main() {
 		cmdCheck(subargs, *jsonFlag)
 	case "verify":
 		cmdVerify(subargs, *jsonFlag)
+	case "attest":
+		cmdAttest(subargs, *jsonFlag)
 	case "explain":
 		cmdExplain(subargs, *jsonFlag)
 	case "graph":
@@ -119,7 +124,9 @@ Subcommands:
   init      Initialize a new proof graph project (--domain cap|lrat|qmd)
   domains   List known domains (domains list)
   compile   Compile a proof source file to ProofGraph IR
+  check     Run checker against CAS evidence for a claim (no generator)
   verify    Verify attestation integrity
+  attest    Record a manual or external-tool attestation for a claim
   explain   Explain the status of a claim
   graph     Print the claim dependency graph
   frontier  List unresolved direct dependencies of a claim
