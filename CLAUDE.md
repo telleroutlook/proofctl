@@ -20,10 +20,12 @@ The core engine (`internal/`) has zero domain knowledge. Domain specifics live i
 
 ## Go conventions
 
-- After any Go change: `go build ./...` then `~/go/bin/staticcheck ./...`
-- After any test change: `go test ./...` — zero failures is the bar
+- After any Go change: `go build ./...` then `~/go/bin/staticcheck ./...` then `~/go/bin/golangci-lint run ./...`
+- After any test change: `go test ./...` — zero failures is the bar; all packages ≥80% coverage
 - No `// nolint` comments without a justification comment on the same line
 - Error strings: lowercase, no trailing period, wrap with `%w` for sentinel matching
+- `defer f.Close()` must always be `defer func() { _ = f.Close() }()` — bare defer discards the error (errcheck)
+- Non-deferred `f.Close()` results must be assigned: `_ = f.Close()` or checked
 
 ## Python conventions (bridge.py, adapters/cap/)
 
@@ -61,8 +63,50 @@ The core engine (`internal/`) has zero domain knowledge. Domain specifics live i
   must pass before one attestation is written
 - Never call `proofctl replay` twice for the same claim to work around the
   single-attestation-per-claim design — use multi-evidence pairs instead
+- `--semantic` flag: skips exact digest comparison, accepts checker-pass only;
+  writes `reproducible-computation` assurance instead of `exact-replay`
+- `--dry-run` flag: validates CAS state and generator syntax without executing;
+  reports which evidence is missing from CAS and whether path_hint can auto-import
+- On partial failure, a debug record `<claim-id>-replay-partial.json` is written
+  to `.proofctl/attestations/` showing per-evidence pass/fail with detailed reasons
+- `bridge.py` exit codes: 0=certified, 1=uncertified, 2=malformed cert, 3=protocol error
+  (missing BRIDGE_CHECKER env var → exit 3, not exit 2, to prevent useless backoff retries)
 
-## release output files
+## status conventions
+
+- `proofctl status` reads `release_target` from the policy file automatically
+  (via `cfg.PolicyFile` in `.proofctl/config.json`) — no manual wiring needed
+- OPEN claims show distinguishing reason: `(no attestation)` vs `(no evidence registered)`
+- Zero/placeholder `statement.digest` (all-zeros sha256) is flagged `[UNVERIFIED_DIGEST]`;
+  fix with `proofctl compile --fix-digests <source-file>`
+
+## doctor conventions
+
+- `proofctl doctor` checks: proofctl in PATH, project found, BRIDGE_CHECKER set,
+  BRIDGE_CHECKER executable (uses exec.LookPath for bare names like `python3`),
+  PROOFCTL_ADAPTERS set if needed by graph.json, checker pinned, CAS non-empty
+- Exit 0 = all pass; exit 1 = any fail; safe to use as `proofctl doctor || exit 1` in CI
+
+## error message conventions
+
+- Every failure must include: what failed, which entity (claim ID / digest / file path),
+  and why (the underlying OS or protocol error)
+- Generator and checker failures in `replay` must include the full combined output
+- Digest mismatches must diff `sha256_inputs` between old cert (from CAS) and new cert
+- `cas list` walk errors are reported as warnings, not silently swallowed
+- Policy file errors include the file path
+- C04 release blockers name which specific fields are absent (self_digest, start_freshness, end_freshness)
+
+## CI conventions
+
+- CI runs: `go build`, `go vet`, `gofmt -l`, bridge.py sync check, `staticcheck`, 
+  `golangci-lint`, `govulncheck`, `go test`, `go test -race`
+- The pre-commit hook at `.git/hooks/pre-commit` runs the same checks locally
+- The hook is not checked into git (it lives in `.git/hooks/`); new clones must
+  copy it manually or run `cp .git/hooks/pre-commit.sample .git/hooks/pre-commit`
+  (note: the hook is written fresh on each dev machine)
+
+
 
 - `.proofctl/STATUS.json` — written by `proofctl release` (always, pass or fail)
 - `.proofctl/release-snapshot.json` — written by `proofctl release` on pass only;

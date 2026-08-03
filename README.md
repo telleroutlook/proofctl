@@ -73,9 +73,10 @@ proofctl domains list
 go build ./...
 go test ./...
 ~/go/bin/staticcheck ./...
+~/go/bin/golangci-lint run ./...
 ```
 
-Requires Go 1.22 or later.
+Requires Go 1.22 or later. A pre-commit hook that runs all checks is installed automatically by cloning — see `.git/hooks/pre-commit`.
 
 ## Project Layout
 
@@ -150,6 +151,11 @@ Every `proofctl release` evaluates:
 compares it against the pinned evidence digest, and runs the checker — writing an
 `exact-replay` attestation only when all checks pass.
 
+**Flags:**
+- `--semantic` — skip exact digest comparison; accept checker-pass only (useful when source files changed but math is correct)
+- `--dry-run` — validate CAS state and generator syntax without running the generator
+- `--evidence` / `--generator` — repeatable pairs for multi-evidence claims
+
 Single evidence (backward compatible):
 ```bash
 proofctl replay \
@@ -168,10 +174,58 @@ proofctl replay \
   --evidence sha256:<even-digest> --generator "python -m src.gen --sector even --out {cert}"
 ```
 
+Semantic replay (source changed, math correct):
+```bash
+proofctl replay --semantic \
+  --claim thm-main-radius-030 \
+  --evidence sha256:<digest> --generator "python -m src.gen --out {cert}"
+```
+
+Dry-run (check CAS state without running generator):
+```bash
+proofctl replay --dry-run \
+  --claim thm-main-radius-030 \
+  --evidence sha256:<digest> --generator "python -m src.gen --out {cert}"
+```
+
 All evidence items must pass (digest match + checker exit 0) before a single
 `exact-replay` attestation is written to `.proofctl/attestations/<claim-id>-replay.json`.
+On partial failure, a debug record `<claim-id>-replay-partial.json` is written showing
+which items passed.
 
-## Release Snapshot
+## Status Display
+
+`proofctl status` shows claim status with enhanced diagnostics:
+
+- `[UNVERIFIED_DIGEST]` — claim has a zero/placeholder `statement.digest`; run `proofctl compile --fix-digests`
+- `OPEN (no attestation)` — evidence registered but not yet verified
+- `OPEN (no evidence registered)` — claim has no evidence declared in graph.json
+- `release_target` — read automatically from the policy file; shows which claim must be accepted for release
+
+```bash
+proofctl status             # human-readable
+proofctl status --verbose   # includes toolchain versions for accepted claims
+proofctl --json status      # machine-readable JSON with open_reason and unverified_digest fields
+```
+
+## Environment Checks
+
+`proofctl doctor` actively checks that the environment is ready to run:
+
+```
+✓ proofctl in PATH
+✓ .proofctl/ project found
+✗ BRIDGE_CHECKER not set
+  → export BRIDGE_CHECKER="python3 checker/check_certificate.py"
+✓ PROOFCTL_ADAPTERS set
+✓ checker pinned
+✗ CAS is empty — no evidence imported yet
+  → run 'proofctl cas import <cert-file>'
+```
+
+Exit 0 if all checks pass, exit 1 otherwise — safe to use in CI as `proofctl doctor || exit 1`.
+
+
 
 On a successful `proofctl release`, in addition to `.proofctl/STATUS.json`,
 proofctl writes `.proofctl/release-snapshot.json` with richer per-evidence metadata

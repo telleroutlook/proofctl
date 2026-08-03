@@ -907,3 +907,62 @@ T35 (push/pull)        ──→ 依赖 T34
 | 11 | **M19** | Isabelle/HOL 域缺失 | Isabelle bridge + AFP 工具链摘要 | M13 + M14 + M16 之后 |
 | 推后 | **M20** | 单用户假设（暂不阻塞） | `attest push/pull` + 远程 store | M11 完成后按需启动 |
 
+---
+
+## Milestone 21 — 质量与工具链强化 ✅（2026-08-03）
+
+本轮修复解决了外部使用反馈中发现的所有功能、设计和易用性问题。
+
+### 功能修复（11 项）
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | `check` 在 help 中列出但未实现 | 从 usage 中删除 |
+| 2 | doctor 对 `python3` PATH 检查错误 | 改用 `exec.LookPath` |
+| 3 | replay 部分失败无记录 | 写 `*-replay-partial.json` 记录每条 evidence |
+| 4 | exact-replay 与 sha256_inputs 绑定 | 新增 `--semantic` 模式 |
+| 5 | CAS 不自动从 path_hint 导入 | replay 前自动尝试从 path_hint 导入 |
+| 6 | 零 digest 不报警 | status 打 `[UNVERIFIED_DIGEST]` 标记 |
+| 7 | release_target 显示 null | status 自动从 policy 文件读取 |
+| 8 | digest 不匹配不解释原因 | diff sha256_inputs，提示 --semantic |
+| 9 | 无 --dry-run 模式 | replay 新增 `--dry-run` |
+| 10 | OPEN 原因不区分 | 区分 `no attestation` vs `no evidence registered` |
+| 11 | bridge.py 缺 BRIDGE_CHECKER 用 exit 2 | 改为 exit 3（protocol error） |
+
+### 错误信息增强（24 项，8 个模块）
+
+所有失败路径增加详细上下文，包括 claim ID、文件路径、出错实体和可操作的修复建议。
+
+关键修复：
+- `internal/verify`：签名无效的缓存 attestation 现在报错而非静默重跑
+- `internal/runner`：超时包含 checker ID 和配置的超时时长；非 JSON 输出包含前 256 字节
+- `cmd/proofctl/cmd_cas`：JSON 模式下导入失败有独立 error 字段，WalkDir 错误作为 warnings 上报
+- `internal/release/conditions`：C04 blocker 指明哪个字段缺失（self_digest/start_freshness/end_freshness）
+
+### CI 与工具链（golangci-lint + govulncheck）
+
+- CI 新增 `golangci-lint-action` 和 `govulncheck` 步骤
+- Pre-commit hook 涵盖：gofmt、go build、go vet、staticcheck、golangci-lint、govulncheck、bridge.py sync、go test
+- 修复 21 个 errcheck 问题和 3 个 staticcheck 问题（18 个文件）
+
+### 测试覆盖率提升
+
+新增测试文件：
+- `internal/signing/signing_coverage_test.go`（Sign/Verify/Load/Save 边界场景）
+- `internal/runner/runner_coverage_test.go`（RunBatch、timeout、limitedBuffer）
+- `internal/verify/verify_sig_test.go`（verifyAttestationSig 全路径含 corrupt key）
+- `cmd/proofctl/cmd_helpers_test.go`（纯 helper 函数单元测试）
+
+| 包 | 修复前 | 修复后 |
+|---|---|---|
+| `internal/signing` | 77.4% | 85.7% |
+| `internal/verify` | 69.9% | 79.2% |
+| `internal/runner` | 73.2% | 75.0% |
+| `cmd/proofctl` | 0.0% | 4.7%（subprocess 架构限制） |
+
+### 发布
+
+- v0.2.0：功能修复和错误信息增强
+- v0.2.1：工具链强化（lint、CI、pre-commit、测试）
+
+
