@@ -32,12 +32,12 @@ func cmdRelease(args []string, useJSON bool) {
 		Blocker string `json:"blocker,omitempty"`
 	}
 	type releaseOutput struct {
-		Pass            bool              `json:"pass"`
-		Blockers        []string          `json:"blockers"`
-		Conditions      []conditionEntry  `json:"conditions,omitempty"`
-		Released        bool              `json:"released"`
-		Defects         map[string]string `json:"defects,omitempty"`
-		CertifiedRadius interface{}       `json:"certified_radius"`
+		Pass          bool              `json:"pass"`
+		Blockers      []string          `json:"blockers"`
+		Conditions    []conditionEntry  `json:"conditions,omitempty"`
+		Released      bool              `json:"released"`
+		Defects       map[string]string `json:"defects,omitempty"`
+		ReleaseTarget interface{}       `json:"release_target"`
 	}
 
 	conditions := release.EvaluateConditions(g, attestations, pol)
@@ -51,11 +51,11 @@ func cmdRelease(args []string, useJSON bool) {
 				condEntries[i] = conditionEntry{ID: string(c.ID), Passed: c.Passed, Blocker: c.Blocker}
 			}
 			out := releaseOutput{
-				Pass:            pass,
-				Blockers:        blockers,
-				Conditions:      condEntries,
-				Released:        false,
-				CertifiedRadius: nil,
+				Pass:          pass,
+				Blockers:      blockers,
+				Conditions:    condEntries,
+				Released:      false,
+				ReleaseTarget: nil,
 			}
 			if len(defects) > 0 {
 				out.Defects = defects
@@ -88,7 +88,7 @@ func cmdRelease(args []string, useJSON bool) {
 			for claimID, reason := range defects {
 				fmt.Printf("  [DEFECT] %s: %s\n", claimID, reason)
 			}
-			fmt.Println("\ncertified_radius: null")
+			fmt.Println("\nrelease_target: null")
 		}
 		return
 	}
@@ -104,14 +104,14 @@ func cmdRelease(args []string, useJSON bool) {
 			condEntries[i] = conditionEntry{ID: string(c.ID), Passed: c.Passed, Blocker: c.Blocker}
 		}
 		out := releaseOutput{
-			Pass:            pass,
-			Blockers:        blockers,
-			Conditions:      condEntries,
-			Released:        pass,
-			CertifiedRadius: nil,
+			Pass:          pass,
+			Blockers:      blockers,
+			Conditions:    condEntries,
+			Released:      pass,
+			ReleaseTarget: nil,
 		}
 		if pass {
-			out.CertifiedRadius = pol.Target
+			out.ReleaseTarget = pol.Target
 		}
 		if len(defects) > 0 {
 			out.Defects = defects
@@ -124,7 +124,7 @@ func cmdRelease(args []string, useJSON bool) {
 
 	if pass {
 		fmt.Println("PASS: release gate passed")
-		fmt.Printf("certified_radius: %s\n", pol.Target)
+		fmt.Printf("release_target: %s\n", pol.Target)
 	} else {
 		fmt.Printf("RELEASE BLOCKED\n\n")
 		fmt.Printf("Conditions (%d):\n", len(conditions))
@@ -146,7 +146,7 @@ func cmdRelease(args []string, useJSON bool) {
 		for claimID, reason := range defects {
 			fmt.Printf("  [DEFECT] %s: %s\n", claimID, reason)
 		}
-		fmt.Println("\ncertified_radius: null")
+		fmt.Println("\nrelease_target: null")
 	}
 }
 

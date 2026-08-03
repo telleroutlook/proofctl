@@ -10,7 +10,7 @@ import (
 func TestInit_CreatesDirectoryStructure(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := Init(root); err != nil {
+	if err := Init(root, ""); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	for _, dir := range []string{DirName, filepath.Join(DirName, CASDir), filepath.Join(DirName, AttestDir)} {
@@ -27,10 +27,10 @@ func TestInit_CreatesDirectoryStructure(t *testing.T) {
 func TestInit_AlreadyExists(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := Init(root); err != nil {
+	if err := Init(root, ""); err != nil {
 		t.Fatalf("first Init: %v", err)
 	}
-	if err := Init(root); err == nil {
+	if err := Init(root, ""); err == nil {
 		t.Fatal("expected error on second Init, got nil")
 	}
 }
@@ -38,7 +38,7 @@ func TestInit_AlreadyExists(t *testing.T) {
 func TestLoad_RoundTrip(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := Init(root); err != nil {
+	if err := Init(root, ""); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	cfg, err := Load(root)
@@ -48,8 +48,8 @@ func TestLoad_RoundTrip(t *testing.T) {
 	if cfg.Version != "1" {
 		t.Errorf("Version: got %q want %q", cfg.Version, "1")
 	}
-	if cfg.PolicyFile == "" {
-		t.Error("PolicyFile should not be empty after Init")
+	if cfg.GraphSource != "graph.json" {
+		t.Errorf("GraphSource: got %q want %q", cfg.GraphSource, "graph.json")
 	}
 }
 
@@ -65,7 +65,7 @@ func TestLoad_MissingFile(t *testing.T) {
 func TestLoad_InvalidJSON(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := Init(root); err != nil {
+	if err := Init(root, ""); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	cfgPath := filepath.Join(root, DirName, ConfigFile)
@@ -81,7 +81,7 @@ func TestLoad_InvalidJSON(t *testing.T) {
 func TestLoad_UnknownField(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := Init(root); err != nil {
+	if err := Init(root, ""); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	cfgPath := filepath.Join(root, DirName, ConfigFile)
@@ -97,7 +97,7 @@ func TestLoad_UnknownField(t *testing.T) {
 func TestFind_FindsProjectRoot(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := Init(root); err != nil {
+	if err := Init(root, ""); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	// Find from the project root itself.
@@ -113,7 +113,7 @@ func TestFind_FindsProjectRoot(t *testing.T) {
 func TestFind_FindsFromSubdir(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if err := Init(root); err != nil {
+	if err := Init(root, ""); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	// Create a subdirectory and find from it.

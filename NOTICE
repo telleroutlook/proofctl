@@ -1,0 +1,10 @@
+proofctl — Mathematical Proof Certification Platform
+Copyright 2026 telleroutlook
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+If you use proofctl in academic work, please cite:
+
+  proofctl: A mathematical proof certification platform.
+  https://github.com/telleroutlook/proofctl

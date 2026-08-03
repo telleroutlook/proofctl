@@ -57,8 +57,9 @@ func Load(root string) (*ProjectConfig, error) {
 }
 
 // Init creates the .proofctl directory structure in root.
-// Returns error if it already exists.
-func Init(root string) error {
+// policyFile is written as-is into config.json; pass an empty string if unknown.
+// Returns error if .proofctl already exists.
+func Init(root string, policyFile string) error {
 	proofDir := filepath.Join(root, DirName)
 	if _, err := os.Stat(proofDir); err == nil {
 		return fmt.Errorf("config: .proofctl already exists in %s", root)
@@ -70,7 +71,7 @@ func Init(root string) error {
 	}
 	cfg := ProjectConfig{
 		Version:     "1",
-		PolicyFile:  "policies/weil-release-v1.json",
+		PolicyFile:  policyFile,
 		GraphSource: "graph.json",
 	}
 	data, _ := json.MarshalIndent(cfg, "", "  ")

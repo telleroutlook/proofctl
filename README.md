@@ -1,56 +1,58 @@
-# proofctl — Proof Graph Engine
+# proofctl — Mathematical Proof Platform
 
-`proofctl` is a content-addressed, evidence-aware, multi-backend, fail-closed mathematical
-Proof Graph Engine. It manages claims, dependencies, evidence, checkers, trust types, cache,
-and release status for formally verified mathematical software.
+`proofctl` is a content-addressed, evidence-aware, fail-closed **mathematical proof certification platform**. It provides the infrastructure layer for computer-assisted proof (CAP) projects: DAG management, content-addressed storage, attestation chains, freshness tracking, and a release gate.
 
-Claims are nodes in a directed acyclic graph. Each claim carries a content-addressed statement
-digest, a list of dependencies, required assurance levels, evidence references, and a checker
-policy. The engine verifies claims by invoking pinned checkers against pinned evidence, records
-attestations with full provenance, and enforces a release gate that is fail-closed by default.
-The current certified radius is `null` until the release gate passes.
+Mathematical projects provide:
+1. A **claim graph** (`graph.json`) — a DAG of lemmas and theorems
+2. A **domain checker** — any executable that verifies a certificate file
+3. A **release policy** (`policies/*.json`) — declares which claims and metadata keys must be satisfied
 
-## Project Status
+proofctl provides everything else.
 
-**Phase**: 4 complete, Phase 5 in progress  
-**certified_radius**: `null` — release gate has not passed  
-**Shadow integration**: Weil claim graph compiled in shadow mode; D4, D8, D18 blockers reproduced
-
-### Phase completion
-
-| Phase | Title | Status |
-|---|---|---|
-| 0 | Dual-track freeze | complete |
-| 1 | Spec-first | complete |
-| 2 | Go Core MVP | complete |
-| 3 | Checker runner + evidence identity | complete |
-| 4 | Weil shadow integration | complete |
-| 5 | Weil cutover + formal release gate | in progress |
-| 6 | QMD/Markdown frontend | — |
-| 7 | Second-domain generality | — |
-
-### Running the Weil shadow integration
+## Quick Start — New CAP Project
 
 ```bash
-mkdir myproject && cd myproject
-proofctl init
-cp /path/to/proofctl/examples/weil/graph.json .
-cp /path/to/proofctl/policies/weil-release-v1.json policies/
-proofctl compile --adapter weil graph.json
+mkdir my-proof && cd my-proof
+proofctl init --domain cap
+# Edit graph.json: replace placeholder claims with your theorem structure
+# Edit policies/cap-v1.json: set target to your main theorem ID
+# Set BRIDGE_CHECKER to your checker, e.g.:
+#   export BRIDGE_CHECKER="python checker/check_certificate.py"
+proofctl compile --adapter json graph.json
 proofctl status
-proofctl release --dry-run --target @thm-main-radius-030
+proofctl release --dry-run
 ```
 
-> Note: `proofctl init` creates a `policies/` directory reference in `.proofctl/config.json`
-> but does not copy any policy files. You must copy the policy file before running
-> `proofctl release`. The default policy path is `policies/weil-release-v1.json`.
+## Quick Start — weil-lower-bound (reference domain)
+
+The `weil-lower-bound` repository is the first reference implementation. Its
+`.proofctl/` directory, `graph.json`, and `policies/weil-cap-v1.json` are already
+in place. From the `weil-lower-bound` directory:
+
+```bash
+proofctl status          # shows 12 claims OPEN
+proofctl graph           # shows full DAG
+proofctl release --dry-run   # lists all unmet conditions
+```
+
+## Known Domains
+
+```
+proofctl domains list
+```
+
+| Domain | Bridge | Description |
+|--------|--------|-------------|
+| `cap`  | yes    | Computer-Assisted Proof via JSON certificate + standalone checker |
+| `lrat` | —      | LRAT SAT solver: formula → unsat → verified 3-claim graph |
+| `qmd`  | —      | Quarto/Pandoc: extract claims from `<div class="claim">` blocks |
 
 ## Build
 
-```
+```bash
 go build ./...
-go vet ./...
 go test ./...
+~/go/bin/staticcheck ./...
 ```
 
 Requires Go 1.22 or later.
@@ -58,42 +60,88 @@ Requires Go 1.22 or later.
 ## Project Layout
 
 ```
-cmd/proofctl/      CLI entry point
-internal/          Core engine packages (not for external import)
-  ir/              Intermediate representation: types and strict decoder
-  dag/             Claim dependency graph (DAG validation, closure, impact)
-  cas/             Content-addressed storage (sha256, atomic writes)
-  checker/         Checker identity and cache-key derivation
-  runner/          Checker runner interface and native subprocess runner
-  freshness/       File-level freshness snapshots and drift detection
-  policy/          Release policy evaluation
-  attestation/     Attestation combination and self-digest
-  status/          Global status projection over the claim graph
-  release/         Release gate (dry-run + atomic STATUS.json write)
-  snapshot/        Point-in-time immutable graph snapshots
-  compile/         Source compiler (text -> ProofGraph IR)
-pkg/protocol/      Public types for external checker use
-adapters/          Backend adapters (Weil, QMD, Lean)
-schemas/           JSON Schema draft-07 for all wire types
-policies/          Release policy files
-docs/              Design and protocol documentation
-  ADR/             Architecture Decision Records
-examples/          Integration examples
-testdata/          Golden outputs, adversarial inputs, fuzz corpora
+cmd/proofctl/          CLI entry point (13 subcommands)
+internal/
+  ir/                  Intermediate representation types and strict decoder
+  dag/                 Claim DAG (validation, closure, impact, frontier)
+  cas/                 Content-addressed blob store (sha256, atomic writes)
+  checker/             Checker identity pinning and cache-key derivation
+  runner/              Checker runner interface and native subprocess runner
+  freshness/           File-level freshness snapshots and drift detection
+  policy/              Release policy evaluation (required_claims, assurances, metadata keys)
+  attestation/         Attestation combination and self-digest
+  status/              Global status projection over the claim graph
+  release/             Release gate (dry-run + atomic STATUS.json write, 4 universal conditions)
+  snapshot/            Point-in-time immutable graph snapshots
+  compile/             Source compiler (JSON → ProofGraph IR)
+  config/              .proofctl project directory management
+  scaffold/            Domain scaffolding (Go embed: templates + bridge.py)
+  weil/                Weil-domain defect table and shadow attestations
+  lrat/                LRAT SAT domain types
+pkg/protocol/          Public wire types for external checker processes (stable API)
+adapters/
+  cap/                 CAP bridge: proofctl wire protocol ↔ python checker (bridge.py)
+  weil/                Weil claim graph adapter (shadow mode)
+  qmd/                 Quarto/Pandoc QMD adapter
+  lrat/                LRAT problem spec adapter
+  lean/                Lean 4 adapter (stub)
+policies/
+  weil-release-v1.json Weil domain release policy (12 claims + 9 metadata keys)
+  lrat-release-v1.json LRAT domain release policy (placeholder)
+schemas/               JSON Schema draft-07 for all wire types
+docs/                  Design docs, ADRs, protocol specification
+examples/              Integration examples
+testdata/              Golden outputs, adversarial inputs, fuzz corpora
 ```
 
-## Documentation
+## Release Policy Format
+
+A policy file controls what `proofctl release` requires:
+
+```json
+{
+  "version": "1",
+  "target": "thm-my-main-theorem",
+  "allowed_assurances": ["deterministic-cap", "formal-kernel", ...],
+  "forbidden_assurances": ["ai-review", "assumption", "shadow-review"],
+  "required_claims": ["lemma-a", "lemma-b", "thm-my-main-theorem"],
+  "required_metadata_keys": ["cap_format_version", "ldlt_passes", ...]
+}
+```
+
+`required_metadata_keys` are domain-specific keys that at least one checker attestation
+must provide. The `cap` domain uses 9 keys populated by `adapters/cap/bridge.py`.
+
+## Release Gate Conditions
+
+Every `proofctl release` evaluates:
+
+| ID | Condition | Type |
+|----|-----------|------|
+| `C01-global-status-accepted` | All claims accepted | Universal |
+| `C02-assumption-footprint-empty` | No `assumption` assurance | Universal |
+| `C03-assurances-allowed` | All assurances pass policy | Universal |
+| `C04-replay-consistency` | All attestations have freshness/digest | Universal |
+| `meta:<key>` × N | Each `required_metadata_keys` entry present | Domain-specific |
+
+## License
+
+Copyright 2026 telleroutlook. Licensed under the [Apache License, Version 2.0](LICENSE).
+
+If you use proofctl in academic work, please cite:
+
+```
+proofctl: A mathematical proof certification platform.
+https://github.com/telleroutlook/proofctl
+```
+
 
 - [Threat Model](docs/THREAT_MODEL.md)
 - [ProofGraph IR](docs/PROOFGRAPH_IR.md)
 - [Checker Protocol](docs/CHECKER_PROTOCOL.md)
 - [Assurance Model](docs/ASSURANCE_MODEL.md)
-- [Weil Acceptance Criteria](docs/WEIL_ACCEPTANCE.md)
+- [Phase 7 Generality](docs/PHASE7_GENERALITY.md)
 - [ADR-001: Trust Boundaries](docs/ADR/ADR-001-trust-boundaries.md)
 - [ADR-002: Content-Addressed Identity](docs/ADR/ADR-002-content-addressed-identity.md)
 - [ADR-003: Assurance Model](docs/ADR/ADR-003-assurance-model.md)
 - [ADR-004: Release Gate](docs/ADR/ADR-004-release-gate.md)
-
-## Status
-
-`certified_radius=null` — the release gate has not yet passed.

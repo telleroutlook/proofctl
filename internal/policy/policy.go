@@ -10,11 +10,15 @@ import (
 
 // ReleasePolicy defines the assurance and claim requirements for a release gate.
 type ReleasePolicy struct {
-	Version             string   `json:"version"`
-	Target              string   `json:"target"`
-	AllowedAssurances   []string `json:"allowed_assurances"`
-	ForbiddenAssurances []string `json:"forbidden_assurances"`
-	RequiredClaims      []string `json:"required_claims"`
+	Version              string   `json:"version"`
+	Target               string   `json:"target"`
+	AllowedAssurances    []string `json:"allowed_assurances"`
+	ForbiddenAssurances  []string `json:"forbidden_assurances"`
+	RequiredClaims       []string `json:"required_claims"`
+	// RequiredMetadataKeys lists attestation metadata keys that must be present
+	// and non-empty in at least one attestation for a release to pass.
+	// This replaces the former hardcoded Weil-specific C04-C12 conditions.
+	RequiredMetadataKeys []string `json:"required_metadata_keys,omitempty"`
 }
 
 // Evaluate checks whether all required claims are accepted, no forbidden assurance types

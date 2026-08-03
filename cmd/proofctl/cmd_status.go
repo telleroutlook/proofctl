@@ -58,13 +58,13 @@ func cmdStatus(_ []string, useJSON bool) {
 			}
 		}
 		type statusOutput struct {
-			Claims          map[string]claimStatusEntry `json:"claims"`
-			Summary         summaryEntry                `json:"summary"`
-			CertifiedRadius interface{}                 `json:"certified_radius"`
+			Claims        map[string]claimStatusEntry `json:"claims"`
+			Summary       summaryEntry                `json:"summary"`
+			ReleaseTarget interface{}                 `json:"release_target"`
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(statusOutput{Claims: claimsMap, Summary: summ, CertifiedRadius: nil})
+		_ = enc.Encode(statusOutput{Claims: claimsMap, Summary: summ, ReleaseTarget: nil})
 		return
 	}
 
@@ -94,5 +94,5 @@ func cmdStatus(_ []string, useJSON bool) {
 	}
 	fmt.Printf("\nSummary: %d accepted, %d blocked, %d open, %d rejected\n",
 		accepted, blocked, open, rejected)
-	fmt.Println("certified_radius: null")
+	fmt.Println("release_target: null")
 }

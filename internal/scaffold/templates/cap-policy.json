@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "target": "thm-main-radius-030",
+  "target": "thm-REPLACE-ME",
   "allowed_assurances": [
     "formal-kernel",
     "deterministic-cap",
@@ -14,18 +14,7 @@
     "shadow-review"
   ],
   "required_claims": [
-    "def-frozen-model",
-    "lem-d1-normalization",
-    "lem-d2-weil-reduction",
-    "lem-d3-legendre",
-    "lem-d4-kernel-bound",
-    "lem-d5-log-moments",
-    "lem-path-a-primitives",
-    "lem-path-b-primitives",
-    "lem-ab-intersection",
-    "lem-matrix-reconstruction",
-    "lem-interval-ldlt",
-    "thm-main-radius-030"
+    "thm-REPLACE-ME"
   ],
   "required_metadata_keys": [
     "cap_format_version",

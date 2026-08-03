@@ -2,7 +2,8 @@
 //
 // Subcommands:
 //
-//	init      Initialize a new proof graph project
+//	init      Initialize a new proof graph project (--domain cap|lrat|qmd for scaffolding)
+//	domains   List known domains (proofctl domains list)
 //	compile   Compile a proof source file to ProofGraph IR
 //	check     Run checkers for one or more claims
 //	verify    Verify attestation integrity
@@ -65,6 +66,8 @@ func main() {
 		cmdImpact(subargs, *jsonFlag)
 	case "cache":
 		cmdCache(subargs, *jsonFlag)
+	case "domains":
+		cmdDomains(subargs, *jsonFlag)
 	case "release":
 		cmdRelease(subargs, *jsonFlag)
 	case "status":

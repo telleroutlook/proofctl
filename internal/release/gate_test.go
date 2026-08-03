@@ -295,8 +295,8 @@ func TestReleaseTwiceOverwrites(t *testing.T) {
 	}
 }
 
-// TestReleaseCertifiedRadiusOnPass checks that CertifiedRadius is set to Target on pass.
-func TestReleaseCertifiedRadiusOnPass(t *testing.T) {
+// TestReleaseTargetOnPass checks that ReleaseTarget is set to pol.Target on pass.
+func TestReleaseTargetOnPass(t *testing.T) {
 	t.Parallel()
 	outDir := t.TempDir()
 	g := &Gate{OutputDir: outDir}
@@ -310,13 +310,13 @@ func TestReleaseCertifiedRadiusOnPass(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(outDir, StatusFile))
 	var rs ReleaseStatus
 	json.Unmarshal(data, &rs) //nolint — already validated above
-	if rs.CertifiedRadius != pol.Target {
-		t.Errorf("CertifiedRadius: got %q want %q", rs.CertifiedRadius, pol.Target)
+	if rs.ReleaseTarget != pol.Target {
+		t.Errorf("ReleaseTarget: got %q want %q", rs.ReleaseTarget, pol.Target)
 	}
 }
 
-// TestReleaseCertifiedRadiusEmptyOnFail checks that CertifiedRadius is empty on fail.
-func TestReleaseCertifiedRadiusEmptyOnFail(t *testing.T) {
+// TestReleaseTargetEmptyOnFail checks that ReleaseTarget is empty on fail.
+func TestReleaseTargetEmptyOnFail(t *testing.T) {
 	t.Parallel()
 	outDir := t.TempDir()
 	g := &Gate{OutputDir: outDir}
@@ -331,8 +331,8 @@ func TestReleaseCertifiedRadiusEmptyOnFail(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(outDir, StatusFile))
 	var rs ReleaseStatus
 	json.Unmarshal(data, &rs) //nolint — already validated above
-	if rs.CertifiedRadius != "" {
-		t.Errorf("expected empty CertifiedRadius on fail, got %q", rs.CertifiedRadius)
+	if rs.ReleaseTarget != "" {
+		t.Errorf("expected empty ReleaseTarget on fail, got %q", rs.ReleaseTarget)
 	}
 }
 

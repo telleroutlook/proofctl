@@ -32,7 +32,7 @@ func setupWeilShadow(t *testing.T) (root string, g *dag.DAG, atts map[string]*ir
 	dir := t.TempDir()
 
 	// Initialize project structure.
-	if err := config.Init(dir); err != nil {
+	if err := config.Init(dir, ""); err != nil {
 		t.Fatalf("config.Init: %v", err)
 	}
 
@@ -176,10 +176,10 @@ func TestWeilShadowIntegration(t *testing.T) {
 		t.Error("release DryRun: expected non-empty blockers")
 	}
 
-	// Assert: certified_radius stays null (no STATUS.json written).
+	// Assert: release_target stays null (no STATUS.json written).
 	for _, b := range blockers {
-		if contains(b, "certified_radius") {
-			t.Errorf("unexpected certified_radius in blocker: %q", b)
+		if contains(b, "release_target") {
+			t.Errorf("unexpected release_target in blocker: %q", b)
 		}
 	}
 }
@@ -373,7 +373,7 @@ func TestPhase5ColdReplay(t *testing.T) {
 
 	// --- Run 1 ---
 	dir1 := t.TempDir()
-	if err := config.Init(dir1); err != nil {
+	if err := config.Init(dir1, ""); err != nil {
 		t.Fatalf("run1 config.Init: %v", err)
 	}
 	pg1, atts1, err := compileWeilAdapter(src)
@@ -387,7 +387,7 @@ func TestPhase5ColdReplay(t *testing.T) {
 
 	// --- Run 2 ---
 	dir2 := t.TempDir()
-	if err := config.Init(dir2); err != nil {
+	if err := config.Init(dir2, ""); err != nil {
 		t.Fatalf("run2 config.Init: %v", err)
 	}
 	pg2, atts2, err := compileWeilAdapter(src)

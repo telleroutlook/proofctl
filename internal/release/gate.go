@@ -22,12 +22,13 @@ const StatusFile = "STATUS.json"
 
 // ReleaseStatus is written to STATUS.json on a successful release.
 type ReleaseStatus struct {
-	CertifiedRadius string            `json:"certified_radius"`
-	PolicyVersion   string            `json:"policy_version"`
-	Blockers        []string          `json:"blockers,omitempty"`
-	Defects         map[string]string `json:"defects,omitempty"` // D-number → block_reason
-	Conditions      []ConditionResult `json:"conditions,omitempty"`
-	Released        bool              `json:"released"`
+	// ReleaseTarget is the policy target claim ID, set only on a successful release.
+	ReleaseTarget string            `json:"release_target,omitempty"`
+	PolicyVersion string            `json:"policy_version"`
+	Blockers      []string          `json:"blockers,omitempty"`
+	Defects       map[string]string `json:"defects,omitempty"`
+	Conditions    []ConditionResult `json:"conditions,omitempty"`
+	Released      bool              `json:"released"`
 }
 
 // Gate performs release checks for a proof graph.
@@ -116,7 +117,7 @@ func (g *Gate) Release(
 		Conditions:    r.conditions,
 	}
 	if r.pass {
-		rs.CertifiedRadius = pol.Target
+		rs.ReleaseTarget = pol.Target
 	}
 
 	if err := g.writeStatus(rs); err != nil {

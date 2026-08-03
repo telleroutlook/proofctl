@@ -1,6 +1,7 @@
 package release_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/telleroutlook/proofctl/internal/dag"
@@ -19,11 +20,10 @@ func buildGraph(ids ...string) *dag.DAG {
 	return g
 }
 
-// shadowPolicy is a policy that forbids shadow-review and assumption but allows
-// the standard assurance types.
-var shadowPolicy = policy.ReleasePolicy{
+// basePolicy is a policy with no required_metadata_keys (domain-agnostic).
+var basePolicy = policy.ReleasePolicy{
 	Version: "1",
-	Target:  "thm-main-radius-030",
+	Target:  "thm-main",
 	AllowedAssurances: []string{
 		"formal-kernel",
 		"deterministic-cap",
@@ -34,94 +34,134 @@ var shadowPolicy = policy.ReleasePolicy{
 	ForbiddenAssurances: []string{"ai-review", "assumption", "shadow-review"},
 }
 
-// TestEvaluateConditions_AllShadow uses 3 shadow-review attested claims.
-// Expected:
-//   - C01 fails (outcome != accepted)
-//   - C02 passes (no assumption assurance)
-//   - C03 fails (shadow-review is forbidden)
-//   - C04-C12 fail (no metadata keys present)
-//   - C13 fails (no freshness/digest)
-func TestEvaluateConditions_AllShadow(t *testing.T) {
-	ids := []string{"claim-a", "claim-b", "claim-c"}
-	g := buildGraph(ids...)
+// capPolicy adds weil-style required_metadata_keys to basePolicy.
+var capPolicy = policy.ReleasePolicy{
+	Version:             "1",
+	Target:              "thm-main-radius-030",
+	AllowedAssurances:   basePolicy.AllowedAssurances,
+	ForbiddenAssurances: basePolicy.ForbiddenAssurances,
+	RequiredMetadataKeys: []string{
+		"cap_format_version",
+		"ldlt_passes",
+		"odd_sector_passes",
+	},
+}
 
-	attestations := map[string]*ir.Attestation{
-		"claim-a": {
-			ClaimID:   "claim-a",
-			Outcome:   "blocked",
-			Assurance: ir.Assurance("shadow-review"),
-		},
-		"claim-b": {
-			ClaimID:   "claim-b",
-			Outcome:   "blocked",
-			Assurance: ir.Assurance("shadow-review"),
-		},
-		"claim-c": {
-			ClaimID:   "claim-c",
-			Outcome:   "blocked",
-			Assurance: ir.Assurance("shadow-review"),
+// TestEvaluateConditions_NoMetadataKeys verifies that a policy with no
+// required_metadata_keys produces exactly 4 universal conditions.
+func TestEvaluateConditions_NoMetadataKeys(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:        "c1",
+			Outcome:        "accepted",
+			Assurance:      ir.AssuranceFormalKernel,
+			SelfDigest:     "sha256:abc",
+			StartFreshness: "sha256:s",
+			EndFreshness:   "sha256:e",
 		},
 	}
-
-	results := release.EvaluateConditions(g, attestations, shadowPolicy)
-
-	if len(results) != 13 {
-		t.Fatalf("expected 13 results, got %d", len(results))
+	results := release.EvaluateConditions(g, atts, basePolicy)
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
 	}
+	for _, r := range results {
+		if !r.Passed {
+			t.Errorf("condition %s failed unexpectedly: %s", r.ID, r.Blocker)
+		}
+	}
+}
 
-	// C01 should fail — none are accepted
+// TestEvaluateConditions_WithMetadataKeys verifies that required_metadata_keys
+// in the policy produce additional conditions beyond the 4 universal ones.
+func TestEvaluateConditions_WithMetadataKeys(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:        "c1",
+			Outcome:        "accepted",
+			Assurance:      ir.AssuranceFormalKernel,
+			SelfDigest:     "sha256:abc",
+			StartFreshness: "sha256:s",
+			EndFreshness:   "sha256:e",
+			Metadata: map[string]string{
+				"cap_format_version": "2.0",
+				"ldlt_passes":        "true",
+				"odd_sector_passes":  "true",
+			},
+		},
+	}
+	results := release.EvaluateConditions(g, atts, capPolicy)
+	// 4 universal + 3 metadata = 7
+	if len(results) != 7 {
+		t.Fatalf("expected 7 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.Passed {
+			t.Errorf("condition %s failed unexpectedly: %s", r.ID, r.Blocker)
+		}
+	}
+	// Verify meta condition IDs are correctly named.
+	if got := string(results[4].ID); got != "meta:cap_format_version" {
+		t.Errorf("results[4].ID = %q, want %q", got, "meta:cap_format_version")
+	}
+}
+
+// TestEvaluateConditions_MetadataKeyMissing verifies that a missing metadata key
+// produces a failed meta condition with a descriptive blocker.
+func TestEvaluateConditions_MetadataKeyMissing(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:        "c1",
+			Outcome:        "accepted",
+			Assurance:      ir.AssuranceFormalKernel,
+			SelfDigest:     "sha256:abc",
+			StartFreshness: "sha256:s",
+			EndFreshness:   "sha256:e",
+			// No metadata at all.
+		},
+	}
+	results := release.EvaluateConditions(g, atts, capPolicy)
+	if len(results) != 7 {
+		t.Fatalf("expected 7 results, got %d", len(results))
+	}
+	// All 3 meta conditions should fail.
+	for _, r := range results[4:] {
+		if r.Passed {
+			t.Errorf("meta condition %s should have failed", r.ID)
+		}
+		if r.Blocker == "" {
+			t.Errorf("meta condition %s: blocker should not be empty", r.ID)
+		}
+	}
+}
+
+// TestEvaluateConditions_C01GlobalFail verifies C01 fails when a claim is not accepted.
+func TestEvaluateConditions_C01GlobalFail(t *testing.T) {
+	g := buildGraph("claim-a")
+	atts := map[string]*ir.Attestation{
+		"claim-a": {ClaimID: "claim-a", Outcome: "blocked", Assurance: "shadow-review"},
+	}
+	results := release.EvaluateConditions(g, atts, basePolicy)
 	assertFailed(t, results[0], release.CondGlobalStatusAccepted, "C01")
-
-	// C02 should pass — no assumption assurance
-	assertPassed(t, results[1], release.CondAssumptionFootprintEmpty, "C02")
-
-	// C03 should fail — shadow-review is forbidden
-	assertFailed(t, results[2], release.CondAllAssurancesAllowed, "C03")
-
-	// C04-C12 should all fail (shadow mode, no metadata)
-	shadowConds := []struct {
-		idx  int
-		id   release.ConditionID
-		name string
-	}{
-		{3, release.CondCAPFormatV2Frozen, "C04"},
-		{4, release.CondDigestsFresh, "C05"},
-		{5, release.CondPathKeysMatch, "C06"},
-		{6, release.CondIntervalsIntersect, "C07"},
-		{7, release.CondMatrixReconstructed, "C08"},
-		{8, release.CondLDLTPasses, "C09"},
-		{9, release.CondOddSectorPasses, "C10"},
-		{10, release.CondEvenSectorPasses, "C11"},
-		{11, release.CondPivotRadiusRatio, "C12"},
-	}
-	for _, sc := range shadowConds {
-		assertFailed(t, results[sc.idx], sc.id, sc.name)
-	}
-
-	// C13 should fail — no freshness or self-digest
-	assertFailed(t, results[12], release.CondReplayConsistency, "C13")
 }
 
 // TestEvaluateConditions_C02AssumptionFound verifies C02 fails when any attestation
-// has assurance "assumption".
+// uses assurance "assumption".
 func TestEvaluateConditions_C02AssumptionFound(t *testing.T) {
 	g := buildGraph("claim-x")
-	attestations := map[string]*ir.Attestation{
-		"claim-x": {
-			ClaimID:   "claim-x",
-			Outcome:   "accepted",
-			Assurance: ir.AssuranceAssumption,
-		},
+	atts := map[string]*ir.Attestation{
+		"claim-x": {ClaimID: "claim-x", Outcome: "accepted", Assurance: ir.AssuranceAssumption},
 	}
-	results := release.EvaluateConditions(g, attestations, shadowPolicy)
+	results := release.EvaluateConditions(g, atts, basePolicy)
 	assertFailed(t, results[1], release.CondAssumptionFootprintEmpty, "C02")
 }
 
-// TestEvaluateConditions_C13FreshnessPresent verifies C13 passes when all
-// attestations have non-empty SelfDigest, StartFreshness, and EndFreshness.
-func TestEvaluateConditions_C13FreshnessPresent(t *testing.T) {
+// TestEvaluateConditions_C04ReplayPresent verifies C04 passes when freshness fields are set.
+func TestEvaluateConditions_C04ReplayPresent(t *testing.T) {
 	g := buildGraph("claim-y")
-	attestations := map[string]*ir.Attestation{
+	atts := map[string]*ir.Attestation{
 		"claim-y": {
 			ClaimID:        "claim-y",
 			Outcome:        "accepted",
@@ -131,13 +171,9 @@ func TestEvaluateConditions_C13FreshnessPresent(t *testing.T) {
 			EndFreshness:   "sha256:end",
 		},
 	}
-	pol := policy.ReleasePolicy{
-		Version:           "1",
-		AllowedAssurances: []string{"formal-kernel"},
-	}
-	results := release.EvaluateConditions(g, attestations, pol)
-	// C13 is the last result
-	assertPassed(t, results[12], release.CondReplayConsistency, "C13")
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"formal-kernel"}}
+	results := release.EvaluateConditions(g, atts, pol)
+	assertPassed(t, results[3], release.CondReplayConsistency, "C04")
 }
 
 // TestAllPassed_Empty verifies that a nil/empty slice is considered all-passed.
@@ -167,17 +203,30 @@ func TestBlockers_OnlyFailed(t *testing.T) {
 		{ID: release.CondGlobalStatusAccepted, Passed: true},
 		{ID: release.CondAssumptionFootprintEmpty, Passed: false, Blocker: "reason A"},
 		{ID: release.CondAllAssurancesAllowed, Passed: true},
-		{ID: release.CondCAPFormatV2Frozen, Passed: false, Blocker: "reason B"},
+		{ID: "meta:cap_format_version", Passed: false, Blocker: "reason B"},
 	}
 	blockers := release.Blockers(results)
 	if len(blockers) != 2 {
 		t.Fatalf("expected 2 blockers, got %d: %v", len(blockers), blockers)
 	}
-	// Verify content includes the condition ID and blocker text.
 	for _, b := range blockers {
 		if len(b) == 0 {
 			t.Error("blocker string should not be empty")
 		}
+	}
+}
+
+// TestBlockers_ContainID verifies that blocker strings include the condition ID.
+func TestBlockers_ContainID(t *testing.T) {
+	results := []release.ConditionResult{
+		{ID: release.CondAssumptionFootprintEmpty, Passed: false, Blocker: "reason A"},
+	}
+	blockers := release.Blockers(results)
+	if len(blockers) != 1 {
+		t.Fatalf("expected 1 blocker, got %d", len(blockers))
+	}
+	if !strings.Contains(blockers[0], string(release.CondAssumptionFootprintEmpty)) {
+		t.Errorf("blocker %q does not contain condition ID %q", blockers[0], release.CondAssumptionFootprintEmpty)
 	}
 }
 
