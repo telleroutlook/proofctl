@@ -144,3 +144,127 @@ T19 (cas import)   ──→ 独立（只操作 CAS + evidence size）
 T17+T18+T19 完成后 ──→ proofctl verify --project 可在 weil-lower-bound 跑通
 ```
 
+---
+
+## Milestone 7 — 多 evidence replay 与路径可移植性
+
+在对 weil-lower-bound 做深度适配时，发现 proofctl 存在三个阻止正确使用的问题。
+M7 修复这三个问题，使 proofctl 能服务 weil 并可推广到更多数学证明场景。
+
+### 问题背景
+
+**问题 1：`proofctl replay` 不支持一个 claim 对应多个 evidence**
+
+weil 的每个核心 claim 依赖两个证书（odd + even sector），各需独立生成并验证。
+当前 `replay` 只接受一个 `--generator` + 一个 `<digest>`，且 attestation 文件名
+固定为 `<claim-id>-replay.json`，第二次调用直接覆盖第一次。
+
+这不是 weil 特有场景——任何多路独立证书（多参数、多 sector、多 prover）都会遇到。
+
+**问题 2：graph.json 中 checker 路径是绝对路径，无法移植**
+
+`"cmd": ["python3", "/Users/.../proofctl/adapters/cap/bridge.py"]`
+
+换机器、换用户、换 CI 环境即失效。proofctl 没有提供相对路径或变量替换机制。
+
+**问题 3：`proofctl release` 写的快照字段不足，无法替代手工 STATUS.json**
+
+`gate.Release()` 写的快照缺少：`certified_radius`（来自 policy target）、
+per-certificate 的 checker 元数据（pivot_ratio、witness count 等）。
+weil-lower-bound 目前手工维护 STATUS.json，原因就在于此。
+
+---
+
+### T20：`replay` 支持多 evidence（multi-evidence replay）✅
+
+**目标：** 一次 `proofctl replay` 调用可声明同一 claim 的多个 evidence 复现，
+全部通过后才写一条 `exact-replay` attestation。
+
+**接口设计（向后兼容）：**
+
+```
+proofctl replay \
+  --claim thm-main-radius-030 \
+  --evidence sha256:<odd-digest>  --generator "python -m src.gen --sector odd  --out {cert}" \
+  --evidence sha256:<even-digest> --generator "python -m src.gen --sector even --out {cert}" \
+  [--checker "python3 checker/check_certificate.py"]
+```
+
+- `--evidence <digest>` 与 `--generator <cmd>` 成对出现，顺序对齐（第 i 个 `--evidence` 对应第 i 个 `--generator`）
+- 单 `--evidence` + 单 `--generator` 时行为与 M4/T11 完全一致（向后兼容）
+- 全部 evidence 通过后，写一条 attestation，`metadata` 中每个 digest 的结果单独记录
+- attestation 文件名保持 `<claim-id>-replay.json`（一个 claim 只有一条 replay 记录）
+
+**实现要点：**
+- `cmd_replay.go`：将 `--generator` 改为可重复 flag（`multiStringFlag`），与 positional `<digest>...` 对应
+- 或改为 `--evidence <digest>` 可重复 flag + `--generator <cmd>` 可重复 flag，两者数量必须一致
+- 循环执行每对（generator, digest），收集结果，全部通过才写 attestation
+- attestation `metadata` 新增 `evidence_count`、`evidence_digests`（逗号分隔）字段
+
+### T21：checker `cmd` 支持相对路径和 `${VAR}` 占位符 ✅
+
+**目标：** `graph.json` 中的 checker `cmd` 可以写相对路径（相对项目 root）
+或 `${ENV_VAR}` 占位符，由 proofctl 在运行时解析，不再需要绝对路径。
+
+**接口设计：**
+
+```json
+"cmd": ["python3", "${PROOFCTL_ADAPTERS}/cap/bridge.py"]
+```
+
+或使用相对路径（相对于项目 root，即 `.proofctl/` 所在目录）：
+
+```json
+"cmd": ["python3", "adapters/cap/bridge.py"]
+```
+
+**实现要点：**
+- `NativeRunner`（或 runner 初始化路径）：解析 `cmd` 数组时，对每个元素：
+  1. 展开 `${VAR}` → `os.Getenv("VAR")`
+  2. 若路径不是绝对路径，join 项目 root
+- 不修改 graph.json 本身；解析发生在内存中
+- 若展开后路径不存在，报明确错误：`checker cmd[1]: path "adapters/cap/bridge.py" not found (root: /...)`
+
+**weil-lower-bound 适配：** graph.json 中 `cmd` 改为：
+```json
+"cmd": ["python3", "${PROOFCTL_ADAPTERS}/cap/bridge.py"]
+```
+并在 CI/CLAUDE.md 中说明 `PROOFCTL_ADAPTERS` 指向 proofctl 仓库的 `adapters/` 目录。
+
+### T22：`release` 快照包含完整认证元数据 ✅
+
+**目标：** `proofctl release`（非 dry-run）写出的快照文件包含足够信息，
+使 weil-lower-bound 可以删除手工维护的 STATUS.json。
+
+**快照字段增强：**
+```json
+{
+  "release_target": "thm-main-radius-030",
+  "certified_value": "3/10",
+  "generated": "2026-08-03",
+  "claims_accepted": 12,
+  "evidence": [
+    {
+      "digest": "sha256:de3e...",
+      "path_hint": "certificates/030/primary/odd.json",
+      "metadata": { "pivot_radius_ratio": "3.3e8", "ldlt_passes": "true", ... }
+    }
+  ]
+}
+```
+
+- `certified_value`：从 policy 的 `target` claim statement 中提取，或从 attestation metadata 中取
+- `evidence[*].metadata`：从对应 claim 的 attestation `metadata` 字段聚合
+- `gate.Release()` 返回后写到 `.proofctl/release-snapshot.json`（不覆盖用户文件）
+
+---
+
+### 任务顺序（M7）
+
+```
+T21 (路径可移植) ──→ 独立，影响 runner，最先做（修复后可在 weil 运行 verify）
+T20 (multi replay) ──→ 独立，只改 cmd_replay.go
+T22 (release 快照) ──→ 依赖 T20（replay metadata 是快照数据源之一）
+T20+T21+T22 完成后 ──→ weil-lower-bound 可删除 scripts/replay_030.py 和 STATUS.json
+```
+

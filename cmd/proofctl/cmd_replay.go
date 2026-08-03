@@ -17,39 +17,77 @@ import (
 	"github.com/telleroutlook/proofctl/internal/ir"
 )
 
+// multiFlag is a repeatable string flag that collects all occurrences.
+type multiFlag []string
+
+func (f *multiFlag) String() string        { return strings.Join(*f, ", ") }
+func (f *multiFlag) Set(v string) error    { *f = append(*f, v); return nil }
+
 // cmdReplay implements the replay subcommand.
 //
-// Usage:
+// Single-evidence (backward compatible):
 //
-//	proofctl replay --generator "cmd {cert}" --cert-out /tmp/cert.json <evidence-digest>
+//	proofctl replay --claim <id> --generator "cmd {cert}" <digest>
 //
-// Steps:
+// Multi-evidence (one --evidence/--generator pair per certificate):
+//
+//	proofctl replay --claim <id> \
+//	  --evidence sha256:<d1> --generator "cmd --sector odd  --out {cert}" \
+//	  --evidence sha256:<d2> --generator "cmd --sector even --out {cert}"
+//
+// Steps per evidence item:
 //  1. Run generator (substituting {cert} with a temp path)
 //  2. Compute SHA-256 of generated certificate
-//  3. Compare against the expected evidence digest
-//  4. Run checker (via BRIDGE_CHECKER or --checker flag) against the generated cert
-//  5. Write a replay attestation (assurance: exact-replay) to .proofctl/attestations/
-//  6. Print replay report
+//  3. Compare against the expected digest
+//  4. Run checker (via BRIDGE_CHECKER or --checker)
+//
+// A single exact-replay attestation is written only when ALL items pass.
 func cmdReplay(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
-	generatorFlag := fs.String("generator", "", `generator command template; use {cert} as placeholder for output path, e.g. "python -m src.generate_certificate --out {cert}"`)
-	certOutFlag := fs.String("cert-out", "", "where to write the generated certificate (default: temp file, deleted after replay)")
+
+	var evidenceFlags multiFlag
+	var generatorFlags multiFlag
+	fs.Var(&evidenceFlags, "evidence", "evidence digest to replay (repeatable; pairs with --generator)")
+	fs.Var(&generatorFlags, "generator", `generator command template with {cert} placeholder (repeatable)`)
+
 	checkerFlag := fs.String("checker", "", "checker command (default: value of BRIDGE_CHECKER env var)")
 	claimIDFlag := fs.String("claim", "", "claim ID to attest (required)")
+	certOutFlag := fs.String("cert-out", "", "where to write generated certificate (single-evidence only; default: temp file)")
+
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
 
-	if *generatorFlag == "" {
-		die(useJSON, errors.CodeInvalidInput, "replay: --generator is required")
-	}
 	if *claimIDFlag == "" {
 		die(useJSON, errors.CodeInvalidInput, "replay: --claim is required")
 	}
-	if fs.NArg() < 1 {
-		die(useJSON, errors.CodeInvalidInput, "replay: expected <evidence-digest> argument")
+
+	// Build evidence/generator pairs. Two supported calling conventions:
+	//   (a) --evidence d1 --generator g1 --evidence d2 --generator g2  (multi)
+	//   (b) --generator g1 <digest-positional-arg>                      (legacy single)
+	type pair struct {
+		digest    string
+		generator string
 	}
-	expectedDigest := fs.Arg(0)
+	var pairs []pair
+
+	switch {
+	case len(evidenceFlags) > 0 && len(generatorFlags) > 0:
+		if len(evidenceFlags) != len(generatorFlags) {
+			die(useJSON, errors.CodeInvalidInput, fmt.Sprintf(
+				"replay: %d --evidence flag(s) but %d --generator flag(s) — counts must match",
+				len(evidenceFlags), len(generatorFlags)))
+		}
+		for i := range evidenceFlags {
+			pairs = append(pairs, pair{digest: evidenceFlags[i], generator: generatorFlags[i]})
+		}
+	case len(generatorFlags) == 1 && fs.NArg() >= 1:
+		// Legacy: single --generator + positional digest.
+		pairs = append(pairs, pair{digest: fs.Arg(0), generator: generatorFlags[0]})
+	default:
+		die(useJSON, errors.CodeInvalidInput,
+			"replay: use --evidence <digest> --generator <cmd> (repeatable) or legacy --generator <cmd> <digest>")
+	}
 
 	checkerCmd := *checkerFlag
 	if checkerCmd == "" {
@@ -60,80 +98,122 @@ func cmdReplay(args []string, useJSON bool) {
 	}
 
 	root, _, _, _ := loadProjectGraph(useJSON)
-
-	// Determine certificate output path.
-	certPath := *certOutFlag
-	tmpCert := false
-	if certPath == "" {
-		f, err := os.CreateTemp("", "proofctl-replay-*.json")
-		if err != nil {
-			die(useJSON, errors.CodeInternalError, "replay: cannot create temp file: "+err.Error())
-		}
-		certPath = f.Name()
-		f.Close()
-		tmpCert = true
-	}
-	if tmpCert {
-		defer os.Remove(certPath)
-	}
-
 	replayDate := time.Now().UTC().Format("2006-01-02")
 
-	// Step 1: run generator.
-	genCmd := strings.ReplaceAll(*generatorFlag, "{cert}", certPath)
-	genParts := strings.Fields(genCmd)
-	if !useJSON {
-		fmt.Printf("replay: running generator: %s\n", genCmd)
-	}
-	genOut, err := exec.Command(genParts[0], genParts[1:]...).CombinedOutput()
-	if err != nil {
-		msg := fmt.Sprintf("generator failed: %v\n%s", err, genOut)
-		die(useJSON, errors.CodeInternalError, msg)
+	type itemResult struct {
+		expectedDigest  string
+		generatedDigest string
+		digestMatch     bool
+		checkerExit     int
+		checkerPass     bool
 	}
 
-	// Step 2: compute SHA-256 of generated certificate.
-	f, err := os.Open(certPath)
-	if err != nil {
-		die(useJSON, errors.CodeInternalError, "replay: cannot open generated cert: "+err.Error())
-	}
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		f.Close()
-		die(useJSON, errors.CodeInternalError, "replay: hash error: "+err.Error())
-	}
-	f.Close()
-	gotDigest := fmt.Sprintf("sha256:%x", h.Sum(nil))
+	results := make([]itemResult, len(pairs))
+	allPass := true
 
-	digestMatch := gotDigest == expectedDigest
+	for i, p := range pairs {
+		label := fmt.Sprintf("evidence[%d] %s", i, p.digest)
 
-	// Step 3: run checker via bridge.
-	checkerParts := strings.Fields(checkerCmd)
-	checkerParts = append(checkerParts, certPath)
-	if !useJSON {
-		fmt.Printf("replay: running checker: %s\n", strings.Join(checkerParts, " "))
-	}
-	checkerResult := struct {
-		exit int
-		out  []byte
-	}{}
-	checkerRun := exec.Command(checkerParts[0], checkerParts[1:]...)
-	checkerRun.Env = os.Environ()
-	checkerResult.out, _ = checkerRun.CombinedOutput()
-	checkerResult.exit = 0
-	if err := checkerRun.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			checkerResult.exit = exitErr.ExitCode()
+		// Resolve certificate output path.
+		certPath := ""
+		tmpCert := false
+		if len(pairs) == 1 && *certOutFlag != "" {
+			certPath = *certOutFlag
 		} else {
-			checkerResult.exit = 1
+			f, err := os.CreateTemp("", "proofctl-replay-*.json")
+			if err != nil {
+				die(useJSON, errors.CodeInternalError, "replay: cannot create temp file: "+err.Error())
+			}
+			certPath = f.Name()
+			f.Close()
+			tmpCert = true
+		}
+		if tmpCert {
+			defer os.Remove(certPath) //nolint:gocritic // intentional: one deferred remove per temp file
+		}
+
+		// Step 1: run generator.
+		genCmd := strings.ReplaceAll(p.generator, "{cert}", certPath)
+		genParts := strings.Fields(genCmd)
+		if !useJSON {
+			fmt.Printf("\nreplay %s: running generator: %s\n", label, genCmd)
+		}
+		genOut, genErr := exec.Command(genParts[0], genParts[1:]...).CombinedOutput()
+		if genErr != nil {
+			if !useJSON {
+				fmt.Printf("  FAIL: generator: %v\n%s\n", genErr, genOut)
+			}
+			results[i] = itemResult{expectedDigest: p.digest, checkerExit: -1}
+			allPass = false
+			continue
+		}
+
+		// Step 2: SHA-256 of generated certificate.
+		f, err := os.Open(certPath)
+		if err != nil {
+			die(useJSON, errors.CodeInternalError, "replay: cannot open generated cert: "+err.Error())
+		}
+		h := sha256.New()
+		if _, err := io.Copy(h, f); err != nil {
+			f.Close()
+			die(useJSON, errors.CodeInternalError, "replay: hash error: "+err.Error())
+		}
+		f.Close()
+		gotDigest := fmt.Sprintf("sha256:%x", h.Sum(nil))
+		digestMatch := gotDigest == p.digest
+
+		// Step 3: run checker.
+		checkerParts := strings.Fields(checkerCmd)
+		checkerParts = append(checkerParts, certPath)
+		if !useJSON {
+			fmt.Printf("  running checker: %s\n", strings.Join(checkerParts, " "))
+		}
+		checkerRun := exec.Command(checkerParts[0], checkerParts[1:]...)
+		checkerRun.Env = os.Environ()
+		checkerExit := 0
+		if runErr := checkerRun.Run(); runErr != nil {
+			if exitErr, ok := runErr.(*exec.ExitError); ok {
+				checkerExit = exitErr.ExitCode()
+			} else {
+				checkerExit = 1
+			}
+		}
+		checkerPass := checkerExit == 0
+
+		results[i] = itemResult{
+			expectedDigest:  p.digest,
+			generatedDigest: gotDigest,
+			digestMatch:     digestMatch,
+			checkerExit:     checkerExit,
+			checkerPass:     checkerPass,
+		}
+
+		if !digestMatch || !checkerPass {
+			allPass = false
+		}
+		if !useJSON {
+			if digestMatch && checkerPass {
+				fmt.Printf("  PASS\n")
+			} else {
+				if !digestMatch {
+					fmt.Printf("  FAIL: digest mismatch: got %s, want %s\n", gotDigest, p.digest)
+				}
+				if !checkerPass {
+					fmt.Printf("  FAIL: checker exit %d\n", checkerExit)
+				}
+			}
 		}
 	}
 
-	checkerPass := checkerResult.exit == 0
-	replayPass := digestMatch && checkerPass
-
-	// Step 4: write attestation if replay passed.
+	// Write attestation only when all evidence items pass.
 	attestPath := ""
-	if replayPass {
+	if allPass {
+		digests := make([]string, len(pairs))
+		generators := make([]string, len(pairs))
+		for i, p := range pairs {
+			digests[i] = p.digest
+			generators[i] = p.generator
+		}
 		att := ir.Attestation{
 			ClaimID:        *claimIDFlag,
 			Outcome:        string(ir.StatusAccepted),
@@ -141,12 +221,12 @@ func cmdReplay(args []string, useJSON bool) {
 			StartFreshness: replayDate,
 			EndFreshness:   replayDate,
 			Metadata: map[string]string{
-				"cold_replay_date":   replayDate,
-				"generator_cmd":      *generatorFlag,
-				"expected_digest":    expectedDigest,
-				"generated_digest":   gotDigest,
-				"checker_exit":       fmt.Sprintf("%d", checkerResult.exit),
-				"digests_fresh":      "true",
+				"cold_replay_date": replayDate,
+				"evidence_count":   fmt.Sprintf("%d", len(pairs)),
+				"evidence_digests": strings.Join(digests, ","),
+				"generator_cmds":   strings.Join(generators, "|"),
+				"digests_fresh":    "true",
+				"checker_exit":     "0",
 			},
 		}
 		attestDir := filepath.Join(root, config.DirName, config.AttestDir)
@@ -161,15 +241,28 @@ func cmdReplay(args []string, useJSON bool) {
 	}
 
 	if useJSON {
+		type itemJSON struct {
+			ExpectedDigest  string `json:"expected_digest"`
+			GeneratedDigest string `json:"generated_digest,omitempty"`
+			DigestMatch     bool   `json:"digest_match"`
+			CheckerExit     int    `json:"checker_exit"`
+			Pass            bool   `json:"pass"`
+		}
+		items := make([]itemJSON, len(results))
+		for i, res := range results {
+			items[i] = itemJSON{
+				ExpectedDigest:  res.expectedDigest,
+				GeneratedDigest: res.generatedDigest,
+				DigestMatch:     res.digestMatch,
+				CheckerExit:     res.checkerExit,
+				Pass:            res.digestMatch && res.checkerPass,
+			}
+		}
 		out := map[string]any{
-			"pass":             replayPass,
+			"pass":             allPass,
 			"claim_id":         *claimIDFlag,
-			"expected_digest":  expectedDigest,
-			"generated_digest": gotDigest,
-			"digest_match":     digestMatch,
-			"checker_exit":     checkerResult.exit,
-			"checker_pass":     checkerPass,
 			"cold_replay_date": replayDate,
+			"evidence":         items,
 			"attestation":      attestPath,
 		}
 		enc := json.NewEncoder(os.Stdout)
@@ -177,22 +270,13 @@ func cmdReplay(args []string, useJSON bool) {
 		_ = enc.Encode(out)
 	} else {
 		fmt.Printf("\n--- Replay Report ---\n")
-		fmt.Printf("claim:            %s\n", *claimIDFlag)
-		fmt.Printf("expected digest:  %s\n", expectedDigest)
-		fmt.Printf("generated digest: %s\n", gotDigest)
-		fmt.Printf("digest match:     %v\n", digestMatch)
-		fmt.Printf("checker exit:     %d\n", checkerResult.exit)
-		fmt.Printf("date:             %s\n", replayDate)
-		if replayPass {
+		fmt.Printf("claim:    %s\n", *claimIDFlag)
+		fmt.Printf("date:     %s\n", replayDate)
+		fmt.Printf("evidence: %d item(s)\n", len(pairs))
+		if allPass {
 			fmt.Printf("\nREPLAY PASS — attestation written to %s\n", attestPath)
 		} else {
 			fmt.Println("\nREPLAY FAIL")
-			if !digestMatch {
-				fmt.Printf("  digest mismatch: got %s, want %s\n", gotDigest, expectedDigest)
-			}
-			if !checkerPass {
-				fmt.Printf("  checker exit %d\n", checkerResult.exit)
-			}
 			os.Exit(1)
 		}
 	}
