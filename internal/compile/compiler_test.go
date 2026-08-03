@@ -100,3 +100,38 @@ func TestCompile_MultipleClaims_WithDependency(t *testing.T) {
 		t.Errorf("expected 2 claims, got %d", len(pg.Claims))
 	}
 }
+
+func TestCompile_BatchGroup_SameChecker_OK(t *testing.T) {
+	t.Parallel()
+	src := []byte(`{
+		"claims": [
+			{"id":"c1","kind":"lemma","statement":{"text":"t1","digest":"sha256:aa"},"depends_on":[],"evidence":[],"checker_policy":"ck1","batch_group":"lean-env"},
+			{"id":"c2","kind":"lemma","statement":{"text":"t2","digest":"sha256:bb"},"depends_on":[],"evidence":[],"checker_policy":"ck1","batch_group":"lean-env"}
+		],
+		"checkers": [{"id":"ck1","protocol_version":1}],
+		"evidence": []
+	}`)
+	pg, err := Compile(src, FormatJSON)
+	if err != nil {
+		t.Fatalf("expected no error for same checker in batch group, got: %v", err)
+	}
+	if pg.Claims[0].BatchGroup != "lean-env" {
+		t.Errorf("BatchGroup not preserved: %q", pg.Claims[0].BatchGroup)
+	}
+}
+
+func TestCompile_BatchGroup_DifferentChecker_Error(t *testing.T) {
+	t.Parallel()
+	src := []byte(`{
+		"claims": [
+			{"id":"c1","kind":"lemma","statement":{"text":"t1","digest":"sha256:aa"},"depends_on":[],"evidence":[],"checker_policy":"ck1","batch_group":"lean-env"},
+			{"id":"c2","kind":"lemma","statement":{"text":"t2","digest":"sha256:bb"},"depends_on":[],"evidence":[],"checker_policy":"ck2","batch_group":"lean-env"}
+		],
+		"checkers": [{"id":"ck1","protocol_version":1},{"id":"ck2","protocol_version":1}],
+		"evidence": []
+	}`)
+	_, err := Compile(src, FormatJSON)
+	if err == nil {
+		t.Error("expected error for different checker_policy in same batch_group, got nil")
+	}
+}

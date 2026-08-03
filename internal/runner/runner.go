@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/telleroutlook/proofctl/internal/ir"
+	"github.com/telleroutlook/proofctl/pkg/protocol"
 )
 
 // Runner invokes a checker and returns its output.
@@ -294,4 +295,39 @@ func verifyBinaryDigest(path, expectedDigest string) error {
 		return fmt.Errorf("runner: checker binary digest mismatch: want %s got %s", expectedDigest, got)
 	}
 	return nil
+}
+
+// RunBatch invokes the checker once for a group of claims and returns one
+// ClaimResult per claim. The batch input is the same as Run's input but the
+// claim_id field is set to the first claimID; the checker must produce a
+// BatchResult (root JSON object with a "claims" array) on stdout.
+//
+// This is used when ir.Claim.BatchGroup is set: all claims in the group are
+// resolved before calling RunBatch, and results are written as individual
+// attestations by the caller.
+func (r *NativeRunner) RunBatch(
+	ctx context.Context,
+	checkerID ir.CheckerIdentity,
+	input io.Reader,
+) ([]protocol.ClaimResult, error) {
+	outputBytes, err := r.Run(ctx, checkerID, input)
+	if err != nil {
+		// RunError with IsCheckerFail may still carry batch output.
+		var re *RunError
+		if errors.As(err, &re) && re.IsCheckerFail() && len(re.Stderr) > 0 {
+			// Try to parse output even on exit 1.
+		} else if len(outputBytes) == 0 {
+			return nil, fmt.Errorf("runner: batch run failed: %w", err)
+		}
+	}
+
+	if !protocol.IsBatchOutput(outputBytes) {
+		return nil, fmt.Errorf("runner: checker did not return batch output (missing 'claims' field)")
+	}
+
+	var batch protocol.BatchResult
+	if jsonErr := json.Unmarshal(outputBytes, &batch); jsonErr != nil {
+		return nil, fmt.Errorf("runner: parse batch result: %w", jsonErr)
+	}
+	return batch.Claims, nil
 }

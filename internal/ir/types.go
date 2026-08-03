@@ -41,6 +41,10 @@ type Claim struct {
 	RequiredAssurance []string  `json:"required_assurance"`
 	Evidence          []string  `json:"evidence"` // digest refs
 	CheckerPolicy     string    `json:"checker_policy"`
+	// BatchGroup, if non-empty, groups claims that must be verified together by
+	// a single batch checker invocation. All claims in the same group must share
+	// the same checker_policy.
+	BatchGroup string `json:"batch_group,omitempty"`
 }
 
 // Statement holds the human-readable text and its content-addressed digest.

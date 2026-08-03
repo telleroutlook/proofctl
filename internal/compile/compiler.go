@@ -67,5 +67,21 @@ func validate(pg *ir.ProofGraph) error {
 			}
 		}
 	}
+
+	// Verify all claims in the same batch_group share the same checker_policy.
+	groupChecker := make(map[string]string) // batch_group → first checker_policy seen
+	for _, c := range pg.Claims {
+		if c.BatchGroup == "" {
+			continue
+		}
+		if first, ok := groupChecker[c.BatchGroup]; ok {
+			if c.CheckerPolicy != first {
+				return fmt.Errorf("compile: batch_group %q: claim %q uses checker_policy %q but group already uses %q",
+					c.BatchGroup, c.ID, c.CheckerPolicy, first)
+			}
+		} else {
+			groupChecker[c.BatchGroup] = c.CheckerPolicy
+		}
+	}
 	return nil
 }

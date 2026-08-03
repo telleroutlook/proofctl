@@ -2,6 +2,8 @@
 // These types are stable and versioned; breaking changes require a protocol version bump.
 package protocol
 
+import "encoding/json"
+
 // ProtocolVersion is the version of the checker protocol this package implements.
 const ProtocolVersion = 1
 
@@ -79,4 +81,42 @@ type ResourceUsage struct {
 	CPUMillis int64 `json:"cpu_millis"`
 	// MemBytes is peak resident memory in bytes.
 	MemBytes int64 `json:"mem_bytes"`
+}
+
+// BatchResult is written by a batch checker to stdout when a single invocation
+// checks multiple claims at once (e.g. lake build, coqchk, isabelle build).
+// A checker output is treated as batch mode when the root JSON object contains
+// a "claims" array field; otherwise single-claim mode applies (backward compatible).
+//
+// Batch checkers must exit 0 only if every claim in the batch was accepted.
+type BatchResult struct {
+	// Claims contains one result entry per claim checked.
+	Claims []ClaimResult `json:"claims"`
+	// Resources reports total resource consumption for the entire batch.
+	Resources ResourceUsage `json:"resources,omitempty"`
+}
+
+// ClaimResult is a single claim's outcome within a BatchResult.
+type ClaimResult struct {
+	// ClaimID is the identifier of the claim this result belongs to.
+	ClaimID string `json:"claim_id"`
+	// OK is true if the claim was accepted by the checker.
+	OK bool `json:"ok"`
+	// Assurance is the assurance type being asserted (e.g. "formal-kernel").
+	Assurance string `json:"assurance,omitempty"`
+	// Metadata is optional domain-specific key-value pairs stored in the attestation.
+	Metadata map[string]string `json:"metadata,omitempty"`
+	// Error is set when OK is false and the checker produced an error message.
+	Error string `json:"error,omitempty"`
+}
+
+// IsBatchOutput returns true if data contains a root-level "claims" array,
+// indicating the checker used batch mode output.
+func IsBatchOutput(data []byte) bool {
+	// Fast path: scan for the key without full parse.
+	// We unmarshal only the discriminator field.
+	var probe struct {
+		Claims *json.RawMessage `json:"claims"`
+	}
+	return json.Unmarshal(data, &probe) == nil && probe.Claims != nil
 }

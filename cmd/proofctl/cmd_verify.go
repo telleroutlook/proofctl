@@ -105,6 +105,88 @@ func cmdVerify(args []string, useJSON bool) {
 		}
 	}
 
+	// runBatchGroup invokes the checker once for all claims in a BatchGroup and
+	// writes one attestation per claim. All claims in the group share the same checker.
+	runBatchGroup := func(groupClaims []*ir.Claim) []verifyResult {
+		if len(groupClaims) == 0 {
+			return nil
+		}
+		pg := loadRawGraph(root, useJSON)
+		checkerID, found := findChecker(pg, groupClaims[0].CheckerPolicy)
+		if !found {
+			out := make([]verifyResult, len(groupClaims))
+			for i, c := range groupClaims {
+				out[i] = verifyResult{ClaimID: c.ID, Outcome: "error", Error: "no checker for policy " + c.CheckerPolicy}
+			}
+			return out
+		}
+		if warn := checkDependencyDrift(root, checkerID); warn != "" {
+			fmt.Fprintln(os.Stderr, "warn:", warn)
+		}
+		// Build batch input using the first claim's evidence (group shares evidence).
+		evidence := findEvidence(pg, groupClaims[0].Evidence)
+		nr, ok := pipe.Runner.(*runner.NativeRunner)
+		if !ok {
+			// Fallback: run individually.
+			out := make([]verifyResult, len(groupClaims))
+			for i, c := range groupClaims {
+				out[i] = runOne(c.ID)
+			}
+			return out
+		}
+		inputJSON, _ := json.Marshal(map[string]any{
+			"protocol_version": 1,
+			"claim_ids": func() []string {
+				ids := make([]string, len(groupClaims))
+				for i, c := range groupClaims {
+					ids[i] = c.ID
+				}
+				return ids
+			}(),
+			"evidence": evidence,
+		})
+		claimResults, batchErr := nr.RunBatch(context.Background(), checkerID, strings.NewReader(string(inputJSON)))
+		if batchErr != nil {
+			out := make([]verifyResult, len(groupClaims))
+			for i, c := range groupClaims {
+				out[i] = verifyResult{ClaimID: c.ID, Outcome: "error", Error: batchErr.Error()}
+			}
+			return out
+		}
+		// Map results by claim ID; write attestations.
+		resultByID := make(map[string]verifyResult, len(claimResults))
+		attestDir := filepath.Join(root, config.DirName, config.AttestDir)
+		os.MkdirAll(attestDir, 0o755)
+		for _, cr := range claimResults {
+			outcome := "rejected"
+			if cr.OK {
+				outcome = "accepted"
+			}
+			att := &ir.Attestation{
+				ClaimID:   cr.ClaimID,
+				Outcome:   outcome,
+				Assurance: ir.Assurance(cr.Assurance),
+				Metadata:  cr.Metadata,
+			}
+			data, _ := json.MarshalIndent(att, "", "  ")
+			os.WriteFile(filepath.Join(attestDir, cr.ClaimID+".json"), append(data, '\n'), 0o644)
+			resultByID[cr.ClaimID] = verifyResult{
+				ClaimID:   cr.ClaimID,
+				Outcome:   outcome,
+				Assurance: cr.Assurance,
+			}
+		}
+		out := make([]verifyResult, len(groupClaims))
+		for i, c := range groupClaims {
+			if r, ok := resultByID[c.ID]; ok {
+				out[i] = r
+			} else {
+				out[i] = verifyResult{ClaimID: c.ID, Outcome: "error", Error: "no batch result returned for claim"}
+			}
+		}
+		return out
+	}
+
 	var results []verifyResult
 	exitCode := 0
 
@@ -130,12 +212,26 @@ func cmdVerify(args []string, useJSON bool) {
 				continue
 			}
 
+			// Split open claims into batch groups and individual claims.
+			batchGroups := make(map[string][]*ir.Claim) // group → claims
+			var individual []string
+			for _, id := range open {
+				c := g.Claim(id)
+				if c != nil && c.BatchGroup != "" {
+					batchGroups[c.BatchGroup] = append(batchGroups[c.BatchGroup], c)
+				} else {
+					individual = append(individual, id)
+				}
+			}
+
 			sem := make(chan struct{}, maxWorkers)
 			var mu sync.Mutex
 			var wg sync.WaitGroup
-			levelResults := make([]verifyResult, len(open))
+			var levelResults []verifyResult
 
-			for i, claimID := range open {
+			// Dispatch individual claims concurrently.
+			indivResults := make([]verifyResult, len(individual))
+			for i, claimID := range individual {
 				wg.Add(1)
 				go func(idx int, cid string) {
 					defer wg.Done()
@@ -143,11 +239,18 @@ func cmdVerify(args []string, useJSON bool) {
 					defer func() { <-sem }()
 					res := runOne(cid)
 					mu.Lock()
-					levelResults[idx] = res
+					indivResults[idx] = res
 					mu.Unlock()
 				}(i, claimID)
 			}
 			wg.Wait()
+			levelResults = append(levelResults, indivResults...)
+
+			// Dispatch each batch group sequentially (one subprocess per group).
+			for _, groupClaims := range batchGroups {
+				batchResults := runBatchGroup(groupClaims)
+				levelResults = append(levelResults, batchResults...)
+			}
 
 			sort.Slice(levelResults, func(i, j int) bool {
 				return levelResults[i].ClaimID < levelResults[j].ClaimID
