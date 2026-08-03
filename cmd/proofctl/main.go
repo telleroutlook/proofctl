@@ -27,6 +27,7 @@ import (
 
 	"context"
 
+	qmdpkg "github.com/telleroutlook/proofctl/adapters/qmd"
 	"github.com/telleroutlook/proofctl/internal/cas"
 	"github.com/telleroutlook/proofctl/internal/compile"
 	"github.com/telleroutlook/proofctl/internal/config"
@@ -244,15 +245,15 @@ func cmdInit(args []string, useJSON bool) {
 //
 // Usage:
 //
-//	proofctl compile [--adapter weil|json] <source-file>
+//	proofctl compile [--adapter weil|json|qmd] <source-file>
 func cmdCompile(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("compile", flag.ContinueOnError)
-	adapterFlag := fs.String("adapter", "json", "adapter type: json or weil")
+	adapterFlag := fs.String("adapter", "json", "adapter type: json, weil, or qmd")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, "compile: "+err.Error())
 	}
 	if fs.NArg() == 0 {
-		die(useJSON, errors.CodeInvalidInput, "usage: proofctl compile [--adapter weil|json] <source-file>")
+		die(useJSON, errors.CodeInvalidInput, "usage: proofctl compile [--adapter weil|json|qmd] <source-file>")
 	}
 	srcFile := fs.Arg(0)
 	src, err := os.ReadFile(srcFile)
@@ -273,6 +274,7 @@ func cmdCompile(args []string, useJSON bool) {
 	var pg *ir.ProofGraph
 	var shadowAttestations map[string]*ir.Attestation
 	isShadow := false
+	var qmdAdapter *qmdpkg.Adapter
 
 	switch *adapterFlag {
 	case "weil":
@@ -286,8 +288,14 @@ func cmdCompile(args []string, useJSON bool) {
 		if err != nil {
 			die(useJSON, errors.CodeInvalidInput, err.Error())
 		}
+	case "qmd":
+		qmdAdapter = qmdpkg.DefaultAdapter()
+		pg, err = qmdAdapter.Compile(src)
+		if err != nil {
+			die(useJSON, errors.CodeInvalidInput, err.Error())
+		}
 	default:
-		die(useJSON, errors.CodeInvalidInput, "unknown adapter: "+*adapterFlag+"; use json or weil")
+		die(useJSON, errors.CodeInvalidInput, "unknown adapter: "+*adapterFlag+"; use json, weil, or qmd")
 	}
 
 	// Build and validate DAG.
@@ -330,14 +338,32 @@ func cmdCompile(args []string, useJSON bool) {
 		if isShadow {
 			out["shadow"] = true
 		}
+		if qmdAdapter != nil && len(qmdAdapter.Identity.PandocAPIVersion) > 0 {
+			parts := make([]string, len(qmdAdapter.Identity.PandocAPIVersion))
+			for i, v := range qmdAdapter.Identity.PandocAPIVersion {
+				parts[i] = fmt.Sprintf("%d", v)
+			}
+			out["pandoc_api_version"] = strings.Join(parts, ".")
+		}
 		enc := json.NewEncoder(os.Stdout)
 		_ = enc.Encode(out)
 	} else {
-		suffix := ""
-		if isShadow {
-			suffix = " [adapter: weil, shadow mode]"
+		switch *adapterFlag {
+		case "weil":
+			fmt.Printf("Compiled %d claims from %s [adapter: weil, shadow mode]\n", len(pg.Claims), srcFile)
+		case "qmd":
+			pandocVer := ""
+			if qmdAdapter != nil && len(qmdAdapter.Identity.PandocAPIVersion) > 0 {
+				parts := make([]string, len(qmdAdapter.Identity.PandocAPIVersion))
+				for i, v := range qmdAdapter.Identity.PandocAPIVersion {
+					parts[i] = fmt.Sprintf("%d", v)
+				}
+				pandocVer = strings.Join(parts, ".")
+			}
+			fmt.Printf("Compiled %d claims from %s [adapter: qmd, pandoc-api: %s]\n", len(pg.Claims), srcFile, pandocVer)
+		default:
+			fmt.Printf("Compiled %d claims from %s\n", len(pg.Claims), srcFile)
 		}
-		fmt.Printf("Compiled %d claims from %s%s\n", len(pg.Claims), srcFile, suffix)
 	}
 }
 

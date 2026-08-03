@@ -1,0 +1,147 @@
+{
+  "pandoc-api-version": [1, 23, 1],
+  "meta": {
+    "title": {
+      "t": "MetaInlines",
+      "c": [{"t": "Str", "c": "Example Proof Document"}]
+    }
+  },
+  "blocks": [
+    {
+      "t": "Header",
+      "c": [1, ["introduction", [], []], [{"t": "Str", "c": "Introduction"}]]
+    },
+    {
+      "t": "Div",
+      "c": [
+        [
+          "def-example-frozen",
+          ["claim"],
+          [
+            ["kind", "definition"],
+            ["required-assurance", "formal-kernel"]
+          ]
+        ],
+        [
+          {
+            "t": "Para",
+            "c": [
+              {"t": "Str", "c": "The"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "frozen"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "model"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "parameter"},
+              {"t": "Space", "c": null},
+              {"t": "Math", "c": [{"t": "InlineMath"}, "\\theta"]},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "is"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "fixed"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "before"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "evaluation."}
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "t": "Div",
+      "c": [
+        [
+          "lem-example-step1",
+          ["claim"],
+          [
+            ["kind", "computational-lemma"],
+            ["depends-on", "def-example-frozen"],
+            ["required-assurance", "deterministic-cap"],
+            ["checker-policy", "lean4-kernel"]
+          ]
+        ],
+        [
+          {
+            "t": "Para",
+            "c": [
+              {"t": "Str", "c": "Under"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "the"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "frozen"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "parameter"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "assumption,"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "the"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "normalization"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "factor"},
+              {"t": "Space", "c": null},
+              {"t": "Math", "c": [{"t": "InlineMath"}, "N"]},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "satisfies"},
+              {"t": "Space", "c": null},
+              {"t": "Math", "c": [{"t": "InlineMath"}, "0 < N \\le 1"]},
+              {"t": "Str", "c": "."}
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "t": "Div",
+      "c": [
+        [
+          "thm-example-main",
+          ["claim"],
+          [
+            ["kind", "theorem"],
+            ["depends-on", "lem-example-step1"],
+            ["required-assurance", "formal-kernel,independent-review"],
+            ["checker-policy", "lean4-kernel"]
+          ]
+        ],
+        [
+          {
+            "t": "Para",
+            "c": [
+              {"t": "Str", "c": "The"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "main"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "result"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "holds:"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "for"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "all"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "inputs"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "satisfying"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "the"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "step-1"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "bound,"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "the"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "output"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "is"},
+              {"t": "Space", "c": null},
+              {"t": "Str", "c": "correct."}
+            ]
+          }
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "version": "1",
+  "target": "thm-<dynamic>-verified",
+  "allowed_assurances": ["formal-kernel", "deterministic-cap", "exact-replay", "reproducible-computation", "independent-review"],
+  "forbidden_assurances": ["ai-review", "assumption", "shadow-review"],
+  "required_claims": []
+}
