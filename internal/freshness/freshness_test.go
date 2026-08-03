@@ -1,7 +1,6 @@
 package freshness
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -314,7 +313,7 @@ func TestAdversarial_ConcurrentModification_Goroutine(t *testing.T) {
 	// Signal goroutine to write, then wait for confirmation before proceeding.
 	written := make(chan struct{})
 	go func() {
-		_ = os.WriteFile(path, []byte(fmt.Sprintf("goroutine-write")), 0o644)
+		_ = os.WriteFile(path, []byte("goroutine-write"), 0o644)
 		close(written)
 	}()
 	<-written // guaranteed: write complete before after snapshot

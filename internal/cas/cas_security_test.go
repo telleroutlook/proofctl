@@ -248,6 +248,9 @@ func TestAdversarial_SymlinkEscape(t *testing.T) {
 // by returning an error and cleaning up the temp file.
 func TestStore_IOError(t *testing.T) {
 	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("chmod permission checks are bypassed when running as root")
+	}
 	// Create a store in a read-only directory to force temp-file creation failure.
 	dir := t.TempDir()
 	s, err := cas.New(filepath.Join(dir, "cas"))
