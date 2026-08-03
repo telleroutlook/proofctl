@@ -18,8 +18,9 @@ func TestDoctor_OutsideProject(t *testing.T) {
 	if code == 0 {
 		t.Error("expected non-zero exit outside a project, got 0")
 	}
-	if !strings.Contains(stderr+run1stdout(t, bin, dir, "doctor"), "proofctl") {
-		// output goes to stdout in text mode
+	combined := stderr + run1stdout(t, bin, dir, "doctor")
+	if !strings.Contains(combined, "proofctl") {
+		t.Errorf("expected 'proofctl' in doctor output, got: %q", combined)
 	}
 }
 

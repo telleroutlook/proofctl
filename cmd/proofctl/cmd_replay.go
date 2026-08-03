@@ -155,11 +155,11 @@ func cmdReplay(args []string, useJSON bool) {
 				die(useJSON, errors.CodeInternalError, "replay: cannot create temp file: "+err.Error())
 			}
 			certPath = f.Name()
-			f.Close()
+			_ = f.Close()
 			tmpCert = true
 		}
 		if tmpCert {
-			defer os.Remove(certPath) //nolint:gocritic // intentional: one deferred remove per temp file
+			defer os.Remove(certPath) //nolint:gocritic,errcheck // intentional: cleanup on exit; error irrelevant
 		}
 
 		// Step 1: run generator.
@@ -189,10 +189,10 @@ func cmdReplay(args []string, useJSON bool) {
 		}
 		h := sha256.New()
 		if _, err := io.Copy(h, f); err != nil {
-			f.Close()
+			_ = f.Close()
 			die(useJSON, errors.CodeInternalError, "replay: hash error: "+err.Error())
 		}
-		f.Close()
+		_ = f.Close()
 		gotDigest := fmt.Sprintf("sha256:%x", h.Sum(nil))
 		digestMatch := gotDigest == p.digest || *semanticFlag
 
@@ -477,7 +477,7 @@ func autoImportFromPathHint(root, casRoot, digest string) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("open path_hint %s: %w", ev.PathHint, err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		store, err := cas.New(casRoot)
 		if err != nil {
 			return false, fmt.Errorf("open CAS: %w", err)

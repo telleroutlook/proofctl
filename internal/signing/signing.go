@@ -58,7 +58,7 @@ func (k *Key) SavePrivate(path string) error {
 	if err != nil {
 		return fmt.Errorf("signing: create private key file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return pem.Encode(f, block)
 }
 
@@ -73,7 +73,7 @@ func (k *Key) SavePublic(path string) error {
 	if err != nil {
 		return fmt.Errorf("signing: create public key file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return pem.Encode(f, block)
 }
 

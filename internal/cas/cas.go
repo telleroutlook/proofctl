@@ -119,7 +119,7 @@ func (s *Store) Verify(desc ir.EvidenceDescriptor) error {
 	if err != nil {
 		return fmt.Errorf("cas: verify open %s: %w", desc.Digest, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {

@@ -46,7 +46,7 @@ func Load(root string) (*ProjectConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var cfg ProjectConfig
 	dec := json.NewDecoder(f)
 	dec.DisallowUnknownFields()

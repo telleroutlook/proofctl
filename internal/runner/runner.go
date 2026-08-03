@@ -236,7 +236,7 @@ type limitedBuffer struct {
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
-	remaining := b.limit - b.Buffer.Len()
+	remaining := b.limit - b.Len()
 	if remaining <= 0 {
 		return len(p), nil // silently discard
 	}
@@ -291,7 +291,7 @@ func verifyBinaryDigest(path, expectedDigest string) error {
 	if err != nil {
 		return fmt.Errorf("runner: open checker binary for digest check: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return fmt.Errorf("runner: hash checker binary: %w", err)

@@ -78,7 +78,7 @@ func computeFileDigest(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("computeFileDigest: open %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	buf := make([]byte, 32*1024)
 	for {

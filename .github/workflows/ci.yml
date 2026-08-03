@@ -49,6 +49,14 @@ jobs:
       - name: Static analysis
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Test
         run: go test -timeout 120s ./...
 

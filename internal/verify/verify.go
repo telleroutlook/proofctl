@@ -269,7 +269,7 @@ func (p *Pipeline) loadCachedAttestation(claimID, cacheKey string) (*ir.Attestat
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	att, err := ir.DecodeAttestation(f)
 	if err != nil {

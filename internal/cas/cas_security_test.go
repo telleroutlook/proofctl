@@ -357,7 +357,7 @@ func TestAdversarial_ConcurrentStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open after concurrent stores: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(rc); err != nil {

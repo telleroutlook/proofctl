@@ -176,7 +176,9 @@ func TestLoadPrivate_InvalidFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.priv")
-	os.WriteFile(path, []byte("not a pem file"), 0o600)
+	if err := os.WriteFile(path, []byte("not a pem file"), 0o600); err != nil {
+		t.Fatalf("write bad key: %v", err)
+	}
 	_, err := signing.LoadPrivate(path)
 	if err == nil {
 		t.Error("LoadPrivate invalid file: expected error, got nil")

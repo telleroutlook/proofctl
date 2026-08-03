@@ -70,7 +70,7 @@ func TestOpenExistingBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	got, err := io.ReadAll(rc)
 	if err != nil {
@@ -184,7 +184,7 @@ func TestStoreEmptyBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open empty blob: %v", err)
 	}
-	rc.Close()
+	rc.Close() //nolint:errcheck // read-only close in test
 }
 
 // TestParseDigestMissingPrefix checks that parseDigest rejects a string without the sha256: prefix.

@@ -84,7 +84,7 @@ func cmdCasImport(args []string, useJSON bool) {
 			continue
 		}
 		digest, size, err := store.Store(f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			errMsg := fmt.Sprintf("store %s: %v", file, err)
 			if useJSON {

@@ -153,10 +153,10 @@ func ensureGitignore(root, pattern string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
-		fmt.Fprintln(f)
+		_, _ = fmt.Fprintln(f)
 	}
-	fmt.Fprintln(f, "# proofctl signing keys — private keys must not be committed")
-	fmt.Fprintln(f, ".proofctl/keys/"+pattern)
+	_, _ = fmt.Fprintln(f, "# proofctl signing keys — private keys must not be committed")
+	_, _ = fmt.Fprintln(f, ".proofctl/keys/"+pattern)
 }

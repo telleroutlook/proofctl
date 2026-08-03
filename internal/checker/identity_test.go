@@ -67,7 +67,7 @@ func TestCacheKeyIs64CharHex(t *testing.T) {
 		t.Errorf("expected 64-char hex key, got len=%d: %q", len(k), k)
 	}
 	for _, ch := range k {
-		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
 			t.Errorf("key contains non-hex character %q: %q", ch, k)
 			break
 		}
