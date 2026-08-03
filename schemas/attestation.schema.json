@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/telleroutlook/proofctl/schemas/attestation.schema.json",
+  "title": "Attestation",
+  "description": "Records a single local verification decision for a claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "claim_id",
+    "statement_digest",
+    "dependency_digests",
+    "evidence",
+    "checker",
+    "outcome",
+    "assurance",
+    "resources",
+    "start_freshness",
+    "end_freshness",
+    "self_digest"
+  ],
+  "properties": {
+    "claim_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The ID of the claim this attestation covers."
+    },
+    "statement_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Content-addressed digest of the claim statement at time of attestation."
+    },
+    "dependency_digests": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+      "description": "Statement digests of all transitive dependencies, in topological order."
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "evidence.schema.json" },
+      "description": "Evidence descriptors used during this attestation."
+    },
+    "checker": {
+      "$ref": "checker.schema.json"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["open", "blocked", "accepted", "rejected", "error", "disproved", "abandoned"],
+      "description": "The verification outcome produced by the checker."
+    },
+    "assurance": {
+      "type": "string",
+      "enum": [
+        "formal-kernel",
+        "deterministic-cap",
+        "exact-replay",
+        "reproducible-computation",
+        "independent-review",
+        "ai-review",
+        "assumption"
+      ],
+      "description": "The assurance type asserted by the checker."
+    },
+    "error_code": {
+      "type": "string",
+      "description": "Machine-readable error code when outcome is 'error'."
+    },
+    "block_reason": {
+      "type": "string",
+      "description": "Human-readable reason when outcome is 'blocked'."
+    },
+    "resources": {
+      "$ref": "#/definitions/resource_stats"
+    },
+    "start_freshness": {
+      "type": "string",
+      "description": "Freshness snapshot digest at the start of the checker invocation."
+    },
+    "end_freshness": {
+      "type": "string",
+      "description": "Freshness snapshot digest at the end of the checker invocation."
+    },
+    "self_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA256 digest of this attestation record, excluding this field."
+    }
+  },
+  "definitions": {
+    "resource_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_millis", "cpu_millis", "mem_bytes"],
+      "properties": {
+        "wall_millis": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock time in milliseconds."
+        },
+        "cpu_millis": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "CPU time in milliseconds."
+        },
+        "mem_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Peak resident memory in bytes."
+        }
+      }
+    }
+  }
+}

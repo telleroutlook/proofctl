@@ -1,0 +1,79 @@
+// Package protocol defines the public wire types for external checker processes.
+// These types are stable and versioned; breaking changes require a protocol version bump.
+package protocol
+
+// ProtocolVersion is the version of the checker protocol this package implements.
+const ProtocolVersion = 1
+
+// CheckerInput is passed to a checker on stdin as a single JSON object.
+type CheckerInput struct {
+	// ProtocolVersion must match the checker's declared protocol version.
+	ProtocolVersion int `json:"protocol_version"`
+	// ClaimID is the identifier of the claim being checked.
+	ClaimID string `json:"claim_id"`
+	// StatementDigest is the content-addressed digest of the claim statement.
+	StatementDigest string `json:"statement_digest"`
+	// StatementText is the human-readable claim statement.
+	StatementText string `json:"statement_text"`
+	// DependencyDigests maps dependency claim IDs to their statement digests.
+	DependencyDigests map[string]string `json:"dependency_digests"`
+	// Evidence is the list of evidence descriptors available to the checker.
+	Evidence []EvidenceRef `json:"evidence"`
+	// PolicyDigest is the content-addressed digest of the checker policy file.
+	PolicyDigest string `json:"policy_digest"`
+}
+
+// EvidenceRef is a reference to an evidence blob available to the checker.
+type EvidenceRef struct {
+	// MediaType is the MIME type of the evidence blob.
+	MediaType string `json:"media_type"`
+	// Digest is the content-addressed digest of the blob (sha256:<hex>).
+	Digest string `json:"digest"`
+	// Size is the byte size of the blob.
+	Size int64 `json:"size"`
+	// LocalPath is the path where the checker can read the blob.
+	// The checker must not write to this path.
+	LocalPath string `json:"local_path"`
+}
+
+// CheckerOutput is written by a checker to stdout as a single JSON object.
+// The checker must exit 0 if and only if the claim is accepted.
+type CheckerOutput struct {
+	// ProtocolVersion must match CheckerInput.ProtocolVersion.
+	ProtocolVersion int `json:"protocol_version"`
+	// ClaimID must echo CheckerInput.ClaimID.
+	ClaimID string `json:"claim_id"`
+	// Outcome is one of "accepted", "rejected", "disproved", "error", "unavailable".
+	Outcome string `json:"outcome"`
+	// Assurance is the assurance type the checker is asserting.
+	Assurance string `json:"assurance"`
+	// Explanation is an optional human-readable explanation of the outcome.
+	Explanation string `json:"explanation,omitempty"`
+	// ErrorCode is set when Outcome is "error" or "unavailable".
+	ErrorCode string `json:"error_code,omitempty"`
+	// Resources reports resource consumption.
+	Resources ResourceUsage `json:"resources"`
+}
+
+// CheckerError is written by a checker to stdout when a protocol-level error occurs.
+// The checker must exit 3 in this case.
+type CheckerError struct {
+	// ProtocolVersion must match CheckerInput.ProtocolVersion.
+	ProtocolVersion int `json:"protocol_version"`
+	// ClaimID echoes CheckerInput.ClaimID, if available.
+	ClaimID string `json:"claim_id,omitempty"`
+	// Code is a machine-readable error code.
+	Code string `json:"code"`
+	// Message is a human-readable error description.
+	Message string `json:"message"`
+}
+
+// ResourceUsage captures resource consumption for a checker invocation.
+type ResourceUsage struct {
+	// WallMillis is wall-clock time in milliseconds.
+	WallMillis int64 `json:"wall_millis"`
+	// CPUMillis is CPU time in milliseconds.
+	CPUMillis int64 `json:"cpu_millis"`
+	// MemBytes is peak resident memory in bytes.
+	MemBytes int64 `json:"mem_bytes"`
+}

@@ -1,0 +1,29 @@
+{
+  "version": "1",
+  "target": "thm-main-radius-030",
+  "allowed_assurances": [
+    "formal-kernel",
+    "deterministic-cap",
+    "exact-replay",
+    "reproducible-computation",
+    "independent-review"
+  ],
+  "forbidden_assurances": [
+    "ai-review",
+    "assumption"
+  ],
+  "required_claims": [
+    "def-frozen-model",
+    "lem-d1-normalization",
+    "lem-d2-weil-reduction",
+    "lem-d3-legendre",
+    "lem-d4-kernel-bound",
+    "lem-d5-log-moments",
+    "lem-path-a-primitives",
+    "lem-path-b-primitives",
+    "lem-ab-intersection",
+    "lem-matrix-reconstruction",
+    "lem-interval-ldlt",
+    "thm-main-radius-030"
+  ]
+}

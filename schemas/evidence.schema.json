@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/telleroutlook/proofctl/schemas/evidence.schema.json",
+  "title": "EvidenceDescriptor",
+  "description": "Identifies a piece of evidence by content address.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["media_type", "digest", "size"],
+  "properties": {
+    "media_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MIME type of the evidence blob, e.g. 'application/octet-stream'."
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Content-addressed SHA256 digest of the evidence blob."
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Size of the evidence blob in bytes."
+    },
+    "path_hint": {
+      "type": "string",
+      "description": "Optional hint for locating the evidence file locally. Not authoritative."
+    }
+  }
+}

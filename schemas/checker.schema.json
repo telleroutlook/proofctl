@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/telleroutlook/proofctl/schemas/checker.schema.json",
+  "title": "CheckerIdentity",
+  "description": "Pins a checker to an exact digest and runtime environment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "protocol_version", "checker_digest", "schema_digest", "runtime", "network"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for this checker."
+    },
+    "protocol_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Checker protocol version. Must match the engine's protocol version."
+    },
+    "checker_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Content-addressed digest of the checker binary or image."
+    },
+    "schema_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Content-addressed digest of the input/output schema used by this checker."
+    },
+    "runtime": {
+      "$ref": "#/definitions/runtime"
+    },
+    "network": {
+      "type": "string",
+      "enum": ["none", "loopback", "unrestricted"],
+      "description": "Network access level permitted for this checker invocation."
+    }
+  },
+  "definitions": {
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["oci", "native", "wasi"],
+          "description": "The execution runtime for this checker."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Content-addressed digest of the runtime image (for 'oci' and 'wasi')."
+        }
+      }
+    }
+  }
+}

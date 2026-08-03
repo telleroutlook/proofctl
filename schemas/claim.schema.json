@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/telleroutlook/proofctl/schemas/claim.schema.json",
+  "title": "Claim",
+  "description": "A single mathematical claim in the proof graph.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "statement", "depends_on", "required_assurance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for this claim within the proof graph."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["theorem", "lemma", "definition", "axiom", "conjecture", "assumption"],
+      "description": "The logical kind of this claim."
+    },
+    "statement": {
+      "$ref": "#/definitions/statement"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "List of claim IDs this claim depends on."
+    },
+    "required_assurance": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/assurance" },
+      "uniqueItems": true,
+      "description": "Assurance types required for this claim to be accepted."
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+      "description": "Content-addressed digest references to evidence blobs."
+    },
+    "checker_policy": {
+      "type": "string",
+      "description": "The ID or path of the checker policy to apply to this claim."
+    }
+  },
+  "definitions": {
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "digest"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable statement of the claim."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Content-addressed SHA256 digest of the statement text."
+        }
+      }
+    },
+    "assurance": {
+      "type": "string",
+      "enum": [
+        "formal-kernel",
+        "deterministic-cap",
+        "exact-replay",
+        "reproducible-computation",
+        "independent-review",
+        "ai-review",
+        "assumption"
+      ]
+    }
+  }
+}
