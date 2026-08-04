@@ -93,6 +93,9 @@ type selfDigestPayload struct {
 
 // ComputeSelfDigest returns the canonical self-digest of att.
 // This is sha256 of the JSON of the payload excluding self_digest and signature.
+//
+// json.Marshal on selfDigestPayload (only strings, slices, and a map[string]string)
+// cannot fail; the error is intentionally suppressed.
 func ComputeSelfDigest(att *AttestationV2) string {
 	p := selfDigestPayload{
 		ProtocolVersion:       att.ProtocolVersion,
@@ -106,10 +109,7 @@ func ComputeSelfDigest(att *AttestationV2) string {
 		StartFreshness:        att.StartFreshness,
 		EndFreshness:          att.EndFreshness,
 	}
-	data, err := json.Marshal(p)
-	if err != nil {
-		panic(fmt.Sprintf("attestation: self-digest marshal: %v", err))
-	}
+	data, _ := json.Marshal(p) // selfDigestPayload contains only JSON-marshallable types
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("sha256:%x", sum)
 }

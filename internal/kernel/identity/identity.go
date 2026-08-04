@@ -62,21 +62,17 @@ type ClaimIdentityInputs struct {
 // The implementation serializes inputs to canonical JSON (sorted keys,
 // no trailing whitespace) and hashes the result with SHA-256. The same
 // inputs always produce the same digest regardless of Go version or platform.
-func Compute(inputs ClaimIdentityInputs) (string, error) {
-	data, err := json.Marshal(inputs)
-	if err != nil {
-		return "", fmt.Errorf("identity: marshal inputs: %w", err)
-	}
+//
+// json.Marshal on ClaimIdentityInputs (strings, string slices, simple structs)
+// cannot fail; the error is suppressed intentionally.
+func Compute(inputs ClaimIdentityInputs) string {
+	data, _ := json.Marshal(inputs) // ClaimIdentityInputs contains only JSON-marshallable types
 	sum := sha256.Sum256(data)
-	return fmt.Sprintf("sha256:%x", sum), nil
+	return fmt.Sprintf("sha256:%x", sum)
 }
 
-// MustCompute is like Compute but panics on error.
-// Use only in tests or during program initialization where errors are fatal.
+// MustCompute is identical to Compute. It exists for callers that prefer
+// an explicit "must succeed" name at call sites.
 func MustCompute(inputs ClaimIdentityInputs) string {
-	digest, err := Compute(inputs)
-	if err != nil {
-		panic(fmt.Sprintf("identity.MustCompute: %v", err))
-	}
-	return digest
+	return Compute(inputs)
 }

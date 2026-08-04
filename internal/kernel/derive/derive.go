@@ -93,41 +93,34 @@ type DeriveInput struct {
 //
 // Rules are applied in strict priority order:
 //  1. If AttestationIdentity is set and differs from CurrentIdentity → STALE (INV-09)
-//  2. If any dep is BLOCKED → BLOCKED (INV-08)
-//  3. If any required dep has not reached RequiredDepStates → BLOCKED (INV-08)
-//  4. If ObligationSet has ≥1 fail → BLOCKED (INV-07)
-//  5. If ObligationSet is absent and Evidence is absent → OPEN
-//  6. If ObligationSet is absent but Evidence exists → CANDIDATE
-//  7. If ObligationSet passes exactly → LOCALLY_VERIFIED
-//  8. If all deps at required state and policy closed → GLOBALLY_VERIFIED
-//  9. If HasReplay → REPRODUCIBLE
-//
-// 10. If IsReleaseRoot and HasSignedManifest → RELEASED
+//  2. If any dep is BLOCKED → BLOCKED (INV-08: block propagates)
+//  3. If ObligationSet has ≥1 fail or set mismatch → BLOCKED (INV-07/INV-06)
+//  4. If ObligationSet is absent and Evidence is absent/partial → OPEN
+//  5. If ObligationSet is absent but Evidence is present → CANDIDATE
+//  6. If ObligationSet passes exactly and all deps at required state → GLOBALLY_VERIFIED
+//  7. If ObligationSet passes exactly but some dep below required state → LOCALLY_VERIFIED
+//     (INV-08: dep not at required state prevents upgrade, but does not propagate BLOCKED)
+//  8. If GLOBALLY_VERIFIED and HasReplay → REPRODUCIBLE
+//  9. If (GLOBALLY_VERIFIED or REPRODUCIBLE) and IsReleaseRoot and HasSignedManifest → RELEASED
 func DeriveClaimState(in DeriveInput) ClaimStateV2 {
 	// Rule 1: staleness check (INV-09)
 	if in.AttestationIdentity != "" && in.AttestationIdentity != in.CurrentIdentity {
 		return StateStale
 	}
 
-	// Rule 2+3: dependency blocking (INV-08)
-	for depID, depState := range in.DepStates {
+	// Rule 2: propagate BLOCKED from deps (INV-08)
+	for _, depState := range in.DepStates {
 		if depState == StateBlocked {
-			_ = depID
 			return StateBlocked
-		}
-		if required, ok := in.RequiredDepStates[depID]; ok {
-			if !stateAtLeast(depState, required) {
-				return StateBlocked
-			}
 		}
 	}
 
-	// Rule 4: any failing obligation (INV-07)
+	// Rule 3: failing obligations → BLOCKED (INV-06, INV-07)
 	if in.ObligationSet == ObligationSetFail || in.ObligationSet == ObligationSetMismatch {
 		return StateBlocked
 	}
 
-	// Rules 5-6: no checker result yet
+	// Rules 4-5: no checker result yet
 	if in.ObligationSet == ObligationSetAbsent {
 		if in.Evidence == EvidenceAbsent || in.Evidence == EvidencePartial {
 			return StateOpen
@@ -135,33 +128,33 @@ func DeriveClaimState(in DeriveInput) ClaimStateV2 {
 		return StateCandidate
 	}
 
-	// Rule 7: obligations pass exactly
+	// Rule 6/7: obligations pass exactly — determine if deps allow GV upgrade.
 	if in.ObligationSet != ObligationSetPass {
 		return StateBlocked
 	}
 
-	// Check deps for GLOBALLY_VERIFIED
+	// Check whether all required deps are at required state (INV-08).
 	depsGV := true
 	for depID, required := range in.RequiredDepStates {
-		if actual, ok := in.DepStates[depID]; !ok || !stateAtLeast(actual, required) {
+		actual, ok := in.DepStates[depID]
+		if !ok || !stateAtLeast(actual, required) {
 			depsGV = false
 			break
 		}
 	}
 	if !depsGV {
+		// Obligations pass locally but deps not ready — stay LOCALLY_VERIFIED (INV-08).
 		return StateLocallyVerified
 	}
 
-	// Rule 9: replay
+	// Rule 8: deps at required state → GLOBALLY_VERIFIED or higher.
+	// Rule 9/10: replay and release.
 	if in.HasReplay {
-		// Rule 10: signed release
 		if in.IsReleaseRoot && in.HasSignedManifest {
 			return StateReleased
 		}
 		return StateReproducible
 	}
-
-	// Rule 8: globally verified
 	if in.IsReleaseRoot && in.HasSignedManifest {
 		return StateReleased
 	}
