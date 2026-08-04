@@ -146,7 +146,7 @@ T17+T18+T19 完成后 ──→ proofctl verify --project 可在 weil-lower-boun
 
 ---
 
-## Milestone 7 — 多 evidence replay 与路径可移植性
+## Milestone 7 — 多 evidence replay 与路径可移植性 ✅
 
 在对 weil-lower-bound 做深度适配时，发现 proofctl 存在三个阻止正确使用的问题。
 M7 修复这三个问题，使 proofctl 能服务 weil 并可推广到更多数学证明场景。
@@ -419,7 +419,7 @@ T24 (pin --lock 扩展)  ──→ 依赖 T23
 
 ---
 
-## Milestone 11 — 密码学 Attestation 签名
+## Milestone 11 — 密码学 Attestation 签名 ✅
 
 **背景：** attestation 文件是纯 JSON，静默写入 `.proofctl/attestations/`。若目录可写，
 任何人可以篡改 attestation 内容而不留痕迹。证明发表时，审稿人和同行需要能独立确认
@@ -965,7 +965,7 @@ T35 (push/pull)        ──→ 依赖 T34
 
 ---
 
-## Milestone 22 — 外部评估修复与策略扩展（2026-08-04）
+## Milestone 22 — 外部评估修复与策略扩展（2026-08-04）✅
 
 **背景：** 外部评估者实际 clone 并运行了 examples/minimal 端到端流程，发现 4 个可复现的阻断性缺陷，
 并提出 4 项策略扩展建议（P1–P4）。本 Milestone 修复所有缺陷并实现其中 3 项高优先级建议。
@@ -1035,7 +1035,7 @@ vs `"self_consistency"`（proofctl check 对已导入 CAS 的 evidence 运行 ch
 
 ---
 
-## Milestone 23 — 实测 Bug 修复与完整性加固（2026-08-04）
+## Milestone 23 — 实测 Bug 修复与完整性加固（2026-08-04）✅
 
 **背景：** 外部实测会话发现 5 个可复现的 proofctl 框架缺陷，以及 6 项结构性 prevention 建议。
 经代码核查，Prevention 1–3 已通过 C06/C07/C08 实现；本 Milestone 修复剩余 5 个 bug 和
@@ -1177,61 +1177,6 @@ T47–T51 互相无依赖，可并行执行
 - `internal/policy/policy.go`：ForbiddenRuntimes 字段
 - `internal/runtime/oci/runner.go`：OCIRunner 骨架，RuntimeClass="isolated-oci"
 - 17 个 validate 测试 + 3 个 C09 测试 + 2 个 OCI 测试
-
----
-
-## Milestone 27 — 可解释状态与开发反馈（Canvas M3）
-
-### 目标
-
-- `proofctl contract lint <contract.json>`：ContractV2 字段完整性检查
-- `proofctl identity @claim`：展示 ClaimIdentity 闭包 inputs 和摘要
-- `proofctl explain-pass @claim`：结构化推导树（状态、依赖、obligations、checker、policy）
-- `proofctl explain-stale @claim`：失效原因分析（哪个字段变化，影响范围）
-- `proofctl impact --changed <digest>`：精确失效节点与原因
-- 删除 `release --fix`（Canvas 明确禁止自动修复 release blocker）
-
-### 具体任务
-
-**T-M27-1：ContractV2 lint（`internal/kernel/contract/lint.go`）**
-- `LintContract(c ContractV2) []LintError`
-- 检查：contract_version=="2"、claim_id 非空、statement_digest 非空、
-  obligations 非空且 ID 唯一、checker 所有 digest 非空非零、
-  runtime.class 与 assurance 相容、evidence mode 合法
-
-**T-M27-2：`proofctl contract lint <file>`**
-- 解析 JSON → LintContract → 输出所有错误
-- 支持 `--json` 模式
-
-**T-M27-3：`proofctl identity @claim`**
-- 从 `.proofctl/graph.json` + 当前 checkers 构建 ClaimIdentityInputs
-- 调用 `internal/kernel/identity.Compute()`
-- 输出：digest、各字段当前值
-
-**T-M27-4：`explain-pass` / `explain-stale` 增强**
-- 在现有 `proofctl explain` 基础上：
-  - `explain-pass`：输出完整推导路径（obligations 逐项、deps 状态、assurance）
-  - `explain-stale`：输出哪个 identity 字段发生变化
-
-**T-M27-5：删除 `release --fix`**
-- 移除 `cmd_release.go` 中 `--fix` flag 和相关逻辑
-- 移除 `--fix` 相关文档和测试
-
-### 出口闸门
-
-- `contract lint` 对缺字段的 ContractV2 报告正确错误
-- `identity @claim` 输出正确 sha256 digest
-- `release --fix` flag 不再存在（`--help` 不显示）
-- `go test ./... staticcheck golangci-lint` 通过
-
----
-
-## Milestone 27 — 可解释状态与开发反馈（Canvas M3）
-
-- `proofctl contract lint`
-- `proofctl explain-pass @claim`、`proofctl explain-stale @claim`、`proofctl identity @claim`、`proofctl impact --changed <digest>`
-- 结构化 blocker IDs；删除 `release --fix`
-- 状态投影缓存自动重建（release 不读 STATUS 文件）
 
 ---
 
