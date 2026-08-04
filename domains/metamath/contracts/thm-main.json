@@ -1,0 +1,44 @@
+{
+  "contract_version": "2",
+  "claim_id": "thm-main",
+  "statement_digest": "sha256:cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333",
+  "dependencies": [
+    {
+      "claim_id": "thm-lem",
+      "required_state": "GLOBALLY_VERIFIED",
+      "statement_digest": "sha256:aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"
+    }
+  ],
+  "evidence": {
+    "mode": "joint",
+    "required": [
+      {
+        "role": "mm-proof",
+        "media_type": "application/vnd.metamath.mm",
+        "digest": "sha256:dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444"
+      }
+    ]
+  },
+  "checker": {
+    "protocol": "proofctl-checker/v2",
+    "checker_digest": "sha256:cc120000cc120000cc120000cc120000cc120000cc120000cc120000cc120000",
+    "schema_digest": "sha256:dd120000dd120000dd120000dd120000dd120000dd120000dd120000dd120000"
+  },
+  "runtime": {
+    "class": "native-dev",
+    "network": "none"
+  },
+  "obligations": [
+    "mm.theorem-exists",
+    "mm.proof-verifies",
+    "mm.lemma-dependency-satisfied"
+  ],
+  "assurance": {
+    "required": ["formal-kernel"]
+  },
+  "replay": {
+    "semantic": "required",
+    "byte_exact": "not_required"
+  },
+  "independence": {}
+}

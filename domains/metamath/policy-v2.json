@@ -1,0 +1,27 @@
+{
+  "version": "2",
+  "target": "thm-main",
+  "allowed_assurances": [
+    "formal-kernel",
+    "deterministic-cap",
+    "exact-replay",
+    "reproducible-computation",
+    "independent-review"
+  ],
+  "forbidden_assurances": [
+    "ai-review",
+    "assumption",
+    "shadow-review"
+  ],
+  "forbidden_runtimes": [
+    "shadow"
+  ],
+  "required_claims": [
+    "thm-lem",
+    "thm-main"
+  ],
+  "required_metadata_keys": [
+    "metamath_version",
+    "theorem"
+  ]
+}

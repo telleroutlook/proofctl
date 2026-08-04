@@ -1398,10 +1398,51 @@ T47–T51 互相无依赖，可并行执行
 
 ---
 
+## Milestone 29 — Mutation、Clean Replay 与正式发布（Canvas M5）✅
+
+### 完成产出（commit fd3a9d3）
+
+- `testdata/mutation/`：9 个 platform mutation fixtures，kill rate = 100%
+- `proofctl mutate`：运行 mutation catalog，exit 1 若任意变异存活
+- `proofctl bundle create`：组装 v2 bundle（manifest + member digests）
+- `proofctl bundle verify`：离线验证所有成员 digest（INV-12）
+
+---
+
 ## Milestone 30 — 第二领域证明通用性（Canvas M6）
 
-- 优先 Metamath，复用同一 kernel/contract/bundle/release 机制
-- core 不新增硬编码；端到端安装真实 checker 的 CI 通过
+### 目标
+
+证明 proofctl 的 kernel/contract/bundle/release 机制对第二领域（Metamath）同样适用，
+core 不新增任何 Metamath 硬编码。
+
+### 具体工作
+
+**T-M30-1：`domains/metamath/` 目录**
+- `domains/metamath/contracts/`：两个 ContractV2 JSON（thm-lem + thm-main）
+- `domains/metamath/policy-v2.json`：Metamath policy v2
+- 复用同一 `proofctl contract lint` 验证
+
+**T-M30-2：`adapters/metamath/bridge.py` 完整性**
+- 现有 bridge.py 已是 stdlib-only；检查是否缺少 BRIDGE_CHECKER 协议支持
+- 若缺失：补充 exit code 和 JSON 输出格式（对齐 Canvas §8）
+
+**T-M30-3：端到端 CI smoke test**
+- `proofctl init --domain metamath` 生成项目
+- `proofctl compile` 通过
+- `proofctl contract lint domains/metamath/contracts/*.json` 通过
+- `proofctl bundle create` 通过（无 checker 运行，仅结构验证）
+- 将此流程加入 `.github/workflows/ci.yml` 的 example-smoke-test job
+
+**T-M30-4：INV 追踪表更新**
+- 更新 PLAN.md Canvas 不变量追踪表，标注 M25–M29 ✅
+
+### 出口闸门
+
+- `domains/metamath/contracts/` 下所有文件通过 `proofctl contract lint`
+- `proofctl init --domain metamath` + compile + bundle create 端到端不报错
+- core（`internal/kernel/`、`internal/release/`、`pkg/protocol/`）无新增 Metamath 硬编码
+- `go test ./...` 通过
 
 ---
 
@@ -1411,15 +1452,15 @@ T47–T51 互相无依赖，可并行执行
 
 | INV | 描述 | 实现位置 | 状态 |
 |---|---|---|---|
-| INV-01 | 用户输入中不存在可写 PASS/RELEASED 字段 | `pkg/protocol/v2` 结构体无此字段 | M24 ✅ |
-| INV-02 | 结果必须绑定完整身份闭包 | `kernel/attestation.Validate` | M25 |
-| INV-03 | attestation self-digest 加载时重算 | `kernel/attestation.Validate` | M25 |
-| INV-04 | 签名必须由 policy 授权角色密钥验证 | `kernel/policy` + `attestation` | M25 |
-| INV-05 | machine assurance 只能由 runtime 后端产生 | `proofverify` 推导 | M25 |
-| INV-06 | obligation 必须恰好返回一次（exact-set） | `kernel/derive` exact-set check | M25/M26 |
-| INV-07 | required evidence 失败即整体失败 | `kernel/derive` | M25 |
-| INV-08 | dependency 未达到所需状态时下游不得升级 | `kernel/derive` | M25 |
-| INV-09 | identity closure 变化时下游自动失效 | `kernel/derive.PropagateStale` | M25 |
-| INV-10 | native 结果不得进 release | runtime 标记 + proofverify 检查 | M26 |
-| INV-11 | release 必须从原始 v2 文件重新推导 | `proofverify` 实现 | M25 |
-| INV-12 | release bundle 可独立离线复核 | `cmd/proofverify bundle.verify` | M25/M29 |
+| INV-01 | 用户输入中不存在可写 PASS/RELEASED 字段 | `pkg/protocol/v2` 结构体无此字段 + `testdata/adversarial/` INV-01 test | M24 ✅ |
+| INV-02 | 结果必须绑定完整身份闭包 | `kernel/attestation.Validate` + `testdata/adversarial/` INV-09 test | M25 ✅ |
+| INV-03 | attestation self-digest 加载时重算 | `kernel/attestation.Validate` + `testdata/mutation/attestation_self_digest_tampered.json` | M25 ✅ |
+| INV-04 | 签名必须由 policy 授权角色密钥验证 | `kernel/attestation.Validate` + `kernel/policy.IsKeyAuthorizedFor` | M25 ✅ |
+| INV-05 | machine assurance 只能由 runtime 后端产生 | `proofverify` 推导（v2 verify 路径不读 Assurance 字段） | M25/M26 ✅ |
+| INV-06 | obligation 必须恰好返回一次（exact-set） | `pkg/protocol/v2.ValidateOutput` + `testdata/mutation/` 3 fixtures | M25/M26 ✅ |
+| INV-07 | required evidence 失败即整体失败 | `kernel/derive.DeriveClaimState` + `testdata/adversarial/` INV-07 test | M25 ✅ |
+| INV-08 | dependency 未达到所需状态时下游不得升级 | `kernel/derive.DeriveClaimState` dep-state rules | M25 ✅ |
+| INV-09 | identity closure 变化时下游自动失效 | `kernel/derive.PropagateStale` + `testdata/mutation/attestation_identity_stale.json` | M25/M29 ✅ |
+| INV-10 | native 结果不得进 release | `internal/release.C09` + `internal/policy.ForbiddenRuntimes` + `testdata/mutation/` C09 fixture | M26/M29 ✅ |
+| INV-11 | release 必须从原始 v2 文件重新推导 | `proofverify bundle.verify` 不读 STATUS 文件 | M25 ✅ |
+| INV-12 | release bundle 可独立离线复核 | `cmd/proofverify bundle.verify` + `proofctl bundle verify` | M25/M29 ✅ |
