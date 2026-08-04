@@ -1,4 +1,5 @@
 /proofctl
 /proofverify
+coverage.out
 .claude/worktrees/
 adapters/**/__pycache__/

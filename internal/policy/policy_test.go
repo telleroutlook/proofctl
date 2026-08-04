@@ -37,7 +37,7 @@ func rejectedAtt(claimID string, assurance ir.Assurance) *ir.Attestation {
 	}
 }
 
-// TestEvaluateAllAccepted checks that all required claims accepted with allowed assurance => pass.
+// TestEvaluateAllAccepted checks that all required claims accepted => pass.
 func TestEvaluateAllAccepted(t *testing.T) {
 	t.Parallel()
 	graph := makeGraph(t, "c1", "c2")
@@ -46,10 +46,9 @@ func TestEvaluateAllAccepted(t *testing.T) {
 		"c2": acceptedAtt("c2", ir.AssuranceFormalKernel),
 	}
 	pol := ReleasePolicy{
-		Version:           "v1",
-		Target:            "main",
-		AllowedAssurances: []string{string(ir.AssuranceFormalKernel)},
-		RequiredClaims:    []string{"c1", "c2"},
+		Version:        "v1",
+		Target:         "main",
+		RequiredClaims: []string{"c1", "c2"},
 	}
 	pass, blockers := Evaluate(graph, atts, pol)
 	if !pass {
@@ -74,46 +73,6 @@ func TestEvaluateMissingAttestation(t *testing.T) {
 	}
 	if len(blockers) == 0 {
 		t.Error("expected at least one blocker")
-	}
-}
-
-// TestEvaluateForbiddenAssurance checks that a forbidden assurance blocks.
-func TestEvaluateForbiddenAssurance(t *testing.T) {
-	t.Parallel()
-	graph := makeGraph(t, "c1")
-	atts := map[string]*ir.Attestation{
-		"c1": acceptedAtt("c1", ir.AssuranceAIReview),
-	}
-	pol := ReleasePolicy{
-		RequiredClaims:      []string{"c1"},
-		ForbiddenAssurances: []string{string(ir.AssuranceAIReview)},
-	}
-	pass, blockers := Evaluate(graph, atts, pol)
-	if pass {
-		t.Error("expected fail due to forbidden assurance, got pass")
-	}
-	if len(blockers) == 0 {
-		t.Error("expected at least one blocker for forbidden assurance")
-	}
-}
-
-// TestEvaluateAssuranceNotInAllowedList checks that assurance not in allowed list blocks.
-func TestEvaluateAssuranceNotInAllowedList(t *testing.T) {
-	t.Parallel()
-	graph := makeGraph(t, "c1")
-	atts := map[string]*ir.Attestation{
-		"c1": acceptedAtt("c1", ir.AssuranceIndependentReview),
-	}
-	pol := ReleasePolicy{
-		RequiredClaims:    []string{"c1"},
-		AllowedAssurances: []string{string(ir.AssuranceFormalKernel)},
-	}
-	pass, blockers := Evaluate(graph, atts, pol)
-	if pass {
-		t.Error("expected fail due to assurance not in allowed list, got pass")
-	}
-	if len(blockers) == 0 {
-		t.Error("expected at least one blocker for disallowed assurance")
 	}
 }
 
@@ -151,22 +110,21 @@ func TestEvaluateMixedConditions(t *testing.T) {
 	t.Parallel()
 	graph := makeGraph(t, "c1", "c2")
 	atts := map[string]*ir.Attestation{
-		// c1 is accepted but uses a forbidden assurance.
+		// c1 is accepted.
 		"c1": acceptedAtt("c1", ir.AssuranceAIReview),
 		// c2 is rejected.
 		"c2": rejectedAtt("c2", ir.AssuranceFormalKernel),
 	}
 	pol := ReleasePolicy{
-		RequiredClaims:      []string{"c1", "c2"},
-		ForbiddenAssurances: []string{string(ir.AssuranceAIReview)},
+		RequiredClaims: []string{"c1", "c2"},
 	}
 	pass, blockers := Evaluate(graph, atts, pol)
 	if pass {
 		t.Error("expected fail for mixed conditions, got pass")
 	}
-	// Should have at least 2 blockers: c1 forbidden assurance + c2 not accepted.
-	if len(blockers) < 2 {
-		t.Errorf("expected at least 2 blockers, got %d: %v", len(blockers), blockers)
+	// Should have exactly 1 blocker: c2 not accepted.
+	if len(blockers) != 1 {
+		t.Errorf("expected 1 blocker, got %d: %v", len(blockers), blockers)
 	}
 }
 

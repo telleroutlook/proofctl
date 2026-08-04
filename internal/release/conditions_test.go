@@ -158,6 +158,42 @@ func TestEvaluateConditions_C02AssumptionFound(t *testing.T) {
 	assertFailed(t, results[1], release.CondAssumptionFootprintEmpty, "C02")
 }
 
+// TestEvaluateConditions_C03ForbiddenAssurance verifies C03 fails when a forbidden assurance is used.
+func TestEvaluateConditions_C03ForbiddenAssurance(t *testing.T) {
+	g := buildGraph("claim-f")
+	atts := map[string]*ir.Attestation{
+		"claim-f": {ClaimID: "claim-f", Outcome: "accepted", Assurance: ir.AssuranceAIReview},
+	}
+	results := release.EvaluateConditions(g, atts, basePolicy)
+	assertFailed(t, results[2], release.CondAllAssurancesAllowed, "C03")
+}
+
+// TestEvaluateConditions_C03NotInAllowedList verifies C03 fails when assurance is not in the allowed list.
+func TestEvaluateConditions_C03NotInAllowedList(t *testing.T) {
+	g := buildGraph("claim-x")
+	pol := policy.ReleasePolicy{
+		AllowedAssurances: []string{"formal-kernel"},
+	}
+	atts := map[string]*ir.Attestation{
+		"claim-x": {ClaimID: "claim-x", Outcome: "accepted", Assurance: ir.AssuranceIndependentReview},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	assertFailed(t, results[2], release.CondAllAssurancesAllowed, "C03")
+}
+
+// TestEvaluateConditions_C03EmptyAssuranceSkipped verifies C03 skips attestations with empty assurance.
+func TestEvaluateConditions_C03EmptyAssuranceSkipped(t *testing.T) {
+	g := buildGraph("claim-v2")
+	pol := policy.ReleasePolicy{
+		AllowedAssurances: []string{"formal-kernel"},
+	}
+	atts := map[string]*ir.Attestation{
+		"claim-v2": {ClaimID: "claim-v2", Outcome: "accepted", Assurance: ""},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	assertPassed(t, results[2], release.CondAllAssurancesAllowed, "C03")
+}
+
 // TestEvaluateConditions_C04ReplayPresent verifies C04 passes when freshness fields are set.
 func TestEvaluateConditions_C04ReplayPresent(t *testing.T) {
 	g := buildGraph("claim-y")

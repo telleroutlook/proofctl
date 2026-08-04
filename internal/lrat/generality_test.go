@@ -340,18 +340,21 @@ func TestGenerality_PolicyEvaluate(t *testing.T) {
 		t.Errorf("policy evaluation failed with blockers: %v", blockers)
 	}
 
-	// Now verify a forbidden assurance blocks.
+	// Verify a forbidden assurance blocks via C03 (assurance enforcement lives in conditions.go).
 	atts[formulaID] = &ir.Attestation{
 		ClaimID:   formulaID,
 		Outcome:   string(ir.StatusAccepted),
 		Assurance: ir.AssuranceAIReview, // forbidden
 	}
-	pass2, blockers2 := policy.Evaluate(d, atts, pol)
-	if pass2 {
-		t.Error("expected policy fail for ai-review assurance, got pass")
+	results := release.EvaluateConditions(d, atts, pol)
+	c03Passed := true
+	for _, r := range results {
+		if r.ID == release.CondAllAssurancesAllowed && !r.Passed {
+			c03Passed = false
+		}
 	}
-	if len(blockers2) == 0 {
-		t.Error("expected blockers for forbidden assurance, got none")
+	if c03Passed {
+		t.Error("expected C03 fail for ai-review assurance, got pass")
 	}
 }
 

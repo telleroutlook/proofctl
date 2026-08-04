@@ -269,35 +269,26 @@ func TestShadowAssuranceForbidden(t *testing.T) {
 		},
 	}
 
-	// Load weil-release-v1.json policy.
-	polData, err := os.ReadFile("policies/weil-release-v1.json")
-	if err != nil {
-		t.Fatalf("read policy: %v", err)
-	}
-	var pol policy.ReleasePolicy
-	if err := json.Unmarshal(polData, &pol); err != nil {
-		t.Fatalf("parse policy: %v", err)
+	// Use a policy that explicitly forbids shadow-review.
+	pol := policy.ReleasePolicy{
+		Version:             "1",
+		Target:              "test-claim",
+		ForbiddenAssurances: []string{string(weil.ShadowAssurance)},
 	}
 
-	// Evaluate policy: shadow-review must be blocked.
-	pass, blockers := policy.Evaluate(g, atts, pol)
-	if pass {
-		t.Error("shadow assurance: expected policy to block, got pass")
-	}
-	if len(blockers) == 0 {
-		t.Error("shadow assurance: expected non-empty blockers for shadow-review")
-	}
-
-	// Verify at least one blocker mentions shadow-review.
-	found := false
-	for _, b := range blockers {
-		if contains(b, "shadow-review") {
-			found = true
-			break
+	// C03 (assurance enforcement) must block shadow-review.
+	results := release.EvaluateConditions(g, atts, pol)
+	c03Blocked := false
+	for _, r := range results {
+		if r.ID == release.CondAllAssurancesAllowed && !r.Passed {
+			c03Blocked = true
+			if !contains(r.Blocker, "shadow-review") {
+				t.Errorf("C03 blocker does not mention shadow-review: %q", r.Blocker)
+			}
 		}
 	}
-	if !found {
-		t.Errorf("shadow assurance: no blocker mentions shadow-review; blockers: %v", blockers)
+	if !c03Blocked {
+		t.Error("shadow assurance: expected C03 to block shadow-review, got pass")
 	}
 }
 

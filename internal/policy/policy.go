@@ -43,23 +43,14 @@ type ReleasePolicy struct {
 	ForbiddenRuntimes []string `json:"forbidden_runtimes,omitempty"`
 }
 
-// Evaluate checks whether all required claims are accepted, no forbidden assurance types
-// appear in any attestation, and all assurances are on the allowed list.
+// Evaluate checks that all required claims are accepted and exist in the graph.
+// Assurance constraints (allowed/forbidden lists) are enforced exclusively by
+// conditions.go C03 to avoid duplicate, divergent checks.
 //
 // It returns (true, nil) on pass and (false, blockers) on failure, where blockers is a
 // list of human-readable failure reasons.
 func Evaluate(graph *dag.DAG, attestations map[string]*ir.Attestation, policy ReleasePolicy) (bool, []string) {
 	var blockers []string
-
-	forbidden := make(map[string]bool, len(policy.ForbiddenAssurances))
-	for _, a := range policy.ForbiddenAssurances {
-		forbidden[a] = true
-	}
-
-	allowed := make(map[string]bool, len(policy.AllowedAssurances))
-	for _, a := range policy.AllowedAssurances {
-		allowed[a] = true
-	}
 
 	// Check required claims are all accepted.
 	for _, claimID := range policy.RequiredClaims {
@@ -71,19 +62,6 @@ func Evaluate(graph *dag.DAG, attestations map[string]*ir.Attestation, policy Re
 		if att.Outcome != string(ir.StatusAccepted) {
 			blockers = append(blockers, fmt.Sprintf("required claim %q outcome is %q, want %q",
 				claimID, att.Outcome, ir.StatusAccepted))
-		}
-	}
-
-	// Check assurance constraints across all attestations.
-	for claimID, att := range attestations {
-		assurance := string(att.Assurance)
-		if forbidden[assurance] {
-			blockers = append(blockers, fmt.Sprintf("claim %q uses forbidden assurance type %q",
-				claimID, assurance))
-		}
-		if len(policy.AllowedAssurances) > 0 && !allowed[assurance] {
-			blockers = append(blockers, fmt.Sprintf("claim %q uses assurance type %q not in allowed list",
-				claimID, assurance))
 		}
 	}
 

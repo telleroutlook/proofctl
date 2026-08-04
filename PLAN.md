@@ -961,7 +961,7 @@ T35 (push/pull)        ──→ 依赖 T34
 - v0.2.6：B18（metadata 覆盖）、B19（self_digest 缺失）、B20（release --fix 误报）、E12（check --evidence）、E13（cas gc 确认）
 - v0.2.9：M23 — Bug 1–5 修复（schema_digest pin、绝对路径拒绝、evidence digest 重算、resources 计时、reviewer 强制）
 
-**当前版本：v0.2.9**（2026-08-04）
+**当前版本：v0.2.7**（2026-08-04）
 
 ---
 
