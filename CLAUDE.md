@@ -128,6 +128,28 @@ The v2 trusted kernel lives in `internal/kernel/`:
 - `proofverify bundle.verify <bundle-dir>` — independent offline verifier (separate binary)
 - Bundle format version must be "2"; format "1" is rejected
 
+## verify conventions
+
+- `proofctl verify @<claim-id>` — re-runs the checker and writes a new attestation
+- `proofctl verify --project [--parallel N]` — verifies all open claims in dependency order
+- `proofctl verify --signature-only @<claim-id>` — offline check without re-running the checker:
+  verifies self_digest integrity, Ed25519 signature (against `.proofctl/keys/*.pub`), and
+  presence of all evidence digests in CAS; exit 1 on any failure
+- `proofctl verify --signature-only --project` — signature-only check over all claims
+- Use `--signature-only` in CI session-start checks and downstream consumer repos to avoid
+  checker binary digest mismatch while still enforcing cryptographic attestation integrity
+
+## git-hook conventions
+
+- `proofctl git-hook install` — injects a POSIX sh block into `.git/hooks/pre-commit`;
+  rejects any staged `.proofctl/attestations/*.json` file that lacks a `"signature"` field
+- `proofctl git-hook uninstall` — removes only the managed block; leaves the rest of the hook intact
+- `proofctl git-hook status` — reports whether the proofctl block is present in the hook
+- `install` is idempotent; safe to run in `proofctl init` scripts or project onboarding
+- The hook is POSIX sh with no external dependencies beyond `git` and `grep`
+- For full cryptographic verification at commit time, pair the hook with `require_signed_attestations: true`
+  in the policy file (activates release C05 condition)
+
 ## error message conventions
 
 - Every failure must include: what failed, which entity (claim ID / digest / file path),
