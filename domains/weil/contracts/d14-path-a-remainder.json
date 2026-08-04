@@ -1,0 +1,28 @@
+{
+  "contract_version": "2",
+  "claim_id": "lem-d14-path-a-remainder",
+  "statement_digest": "sha256:eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555",
+  "dependencies": [{"claim_id":"lem-d13-sector-union","required_state":"GLOBALLY_VERIFIED","statement_digest":"sha256:dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444"}],
+  "evidence": {
+    "mode": "joint",
+    "required": []
+  },
+  "checker": {
+    "protocol": "proofctl-checker/v2",
+    "checker_digest": "sha256:c140000000000000000000000000000000000000000000000000000000000000",
+    "schema_digest": "sha256:s140000000000000000000000000000000000000000000000000000000000000"
+  },
+  "runtime": {
+    "class": "native-dev",
+    "network": "none"
+  },
+  "obligations": ["d14.path-a-remainder-method-valid","d14.path-a-remainder-bound-verified"],
+  "assurance": {
+    "required": ["deterministic-cap"]
+  },
+  "replay": {
+    "semantic": "required",
+    "byte_exact": "not_required"
+  },
+  "independence": {}
+}

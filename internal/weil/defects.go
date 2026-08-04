@@ -74,10 +74,52 @@ var KnownDefects = []Defect{
 		BlockReason: "D10: interval LDLT checker did not produce accepted outcome",
 	},
 	{
+		ID:          "D11",
+		ClaimID:     "lem-d11-odd-sector",
+		Description: "Odd sector integrals not verified by checker",
+		BlockReason: "D11: odd sector checker result missing or not accepted",
+	},
+	{
+		ID:          "D12",
+		ClaimID:     "lem-d12-even-sector",
+		Description: "Even sector integrals not verified by checker",
+		BlockReason: "D12: even sector checker result missing or not accepted",
+	},
+	{
+		ID:          "D13",
+		ClaimID:     "lem-d13-sector-union",
+		Description: "Odd+even sector union not jointly verified",
+		BlockReason: "D13: sector union checker did not confirm full range coverage",
+	},
+	{
+		ID:          "D14",
+		ClaimID:     "lem-d14-path-a-remainder",
+		Description: "Path A remainder bound not verified by approved method",
+		BlockReason: "D14: Path A remainder checker did not produce accepted outcome",
+	},
+	{
+		ID:          "D15",
+		ClaimID:     "lem-d15-path-b-remainder",
+		Description: "Path B remainder bound not verified independently of Path A",
+		BlockReason: "D15: Path B remainder checker missing or shares forbidden artifacts with Path A",
+	},
+	{
+		ID:          "D16",
+		ClaimID:     "lem-d16-independence",
+		Description: "Path A/B independence not machine-verified: checker digests may overlap or share forbidden artifacts",
+		BlockReason: "D16: independence contract not satisfied — paths may share forbidden implementation or artifacts",
+	},
+	{
+		ID:          "D17",
+		ClaimID:     "lem-d17-enclosure",
+		Description: "Final interval enclosure not confirmed; radius lower bound unverified",
+		BlockReason: "D17: final enclosure checker did not confirm radius >= 0.30",
+	},
+	{
 		ID:          "D18",
 		ClaimID:     "thm-main-radius-030",
-		Description: "Main theorem: certified_radius not established; all D4/D8 blockers unresolved",
-		BlockReason: "D18: thm-main-radius-030 blocked — D4 and D8 unresolved; no certified radius",
+		Description: "Main theorem: certified_radius not established; all D4/D8/D16 blockers unresolved",
+		BlockReason: "D18: thm-main-radius-030 blocked — D4, D8, D16 unresolved; no certified radius",
 	},
 }
 

@@ -1,0 +1,32 @@
+{
+  "description": "Weil Path A / Path B independence constraints",
+  "version": "1",
+  "paths": {
+    "path-a": {
+      "implementation_family": "path-a-arb-flint",
+      "generator_lineage": "weil-path-a-generator",
+      "error_bound_method": "arb-interval-quadrature-v1",
+      "primitive_witness_role": "path-a-primitive-leaves",
+      "forbidden_shared_artifacts": [
+        "intermediate-integrals-path-a",
+        "path-a-matrix-entries",
+        "path-a-remainder-bound"
+      ]
+    },
+    "path-b": {
+      "implementation_family": "path-b-independent",
+      "generator_lineage": "weil-path-b-generator",
+      "error_bound_method": "path-b-remainder-method-v1",
+      "primitive_witness_role": "path-b-primitive-leaves",
+      "forbidden_shared_artifacts": [
+        "intermediate-integrals-path-b",
+        "path-b-matrix-entries",
+        "path-b-remainder-bound"
+      ]
+    }
+  },
+  "allowed_shared_definitions": [
+    "def-frozen-model"
+  ],
+  "independence_check": "path-a and path-b must use different generator_lineage, different error_bound_method, different checker implementations (distinct checker_digest), and must not share any forbidden_shared_artifacts"
+}

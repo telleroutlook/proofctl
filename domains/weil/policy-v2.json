@@ -1,0 +1,51 @@
+{
+  "version": "2",
+  "target": "thm-main-radius-030",
+  "allowed_assurances": [
+    "formal-kernel",
+    "deterministic-cap",
+    "exact-replay",
+    "reproducible-computation",
+    "independent-review"
+  ],
+  "forbidden_assurances": [
+    "ai-review",
+    "assumption",
+    "shadow-review"
+  ],
+  "forbidden_runtimes": [
+    "shadow"
+  ],
+  "required_claims": [
+    "def-frozen-model",
+    "lem-d1-normalization",
+    "lem-d2-weil-reduction",
+    "lem-d3-legendre",
+    "lem-d4-kernel-bound",
+    "lem-d5-log-moments",
+    "lem-path-a-primitives",
+    "lem-path-b-primitives",
+    "lem-ab-intersection",
+    "lem-matrix-reconstruction",
+    "lem-interval-ldlt",
+    "lem-d11-odd-sector",
+    "lem-d12-even-sector",
+    "lem-d13-sector-union",
+    "lem-d14-path-a-remainder",
+    "lem-d15-path-b-remainder",
+    "lem-d16-independence",
+    "lem-d17-enclosure",
+    "thm-main-radius-030"
+  ],
+  "required_metadata_keys": [
+    "cap_format_version",
+    "digests_fresh",
+    "path_keys_match",
+    "intervals_intersect",
+    "matrix_reconstructed",
+    "ldlt_passes",
+    "odd_sector_passes",
+    "even_sector_passes",
+    "pivot_radius_ratio"
+  ]
+}

@@ -1244,12 +1244,80 @@ T47–T51 互相无依赖，可并行执行
 
 ---
 
+## Milestone 27 — 可解释状态与开发反馈（Canvas M3）✅
+
+### 完成产出（commit c81f603）
+
+- `internal/kernel/contract/lint.go`：LintContract() 100% 覆盖率，30 个测试
+- `proofctl contract lint <file>`：严格验证 ContractV2 字段，支持 --json
+- `proofctl identity @claim`：构建 ClaimIdentityInputs，输出 identity.Compute() 摘要
+- `cmd_release.go`：删除 --fix flag 和 cmdReleaseFix()（Canvas §14 禁止自动修复）
+
+---
+
 ## Milestone 28 — Weil Contract 与 checker 闭环（Canvas M4）
 
-- D1–D18 Verification Contract 矩阵（`domains/weil/contracts/`）
-- Path A primitive-recompute checker（不信任证书自报派生量）
-- Path B 独立实现 + independence manifest（机器可判定独立性）
-- Weil policy v2
+### 目标
+
+- `domains/weil/contracts/` 目录：D1–D18 每个节点的 ContractV2 JSON
+- `domains/weil/policy-v2.json`：Weil policy v2（含 forbidden_runtimes、required_assurances）
+- `domains/weil/independence.json`：Path A/B 独立性约束声明
+- 每个 ContractV2 通过 `proofctl contract lint` 验证
+- `internal/weil/defects.go` 更新：D1–D18 全部覆盖（补充 D11–D17 缺失节点）
+- `internal/kernel/contract/lint.go` 新增 independence 字段校验
+
+### D1–D18 节点对照表
+
+| 节点 | claim_id | 证明义务 |
+|---|---|---|
+| D1 | lem-d1-normalization | input primitives 规范化验证 |
+| D2 | lem-d2-weil-reduction | Weil explicit formula 规约 |
+| D3 | lem-d3-legendre | Legendre symbol 独立计算 |
+| D4 | lem-d4-kernel-bound | kernel bound primitive set 匹配 |
+| D5 | lem-d5-log-moments | log-moment integrals 冻结参数 |
+| D6 | lem-path-a-primitives | Path A primitive integral set 验证 |
+| D7 | lem-path-b-primitives | Path B primitive integral set 验证 |
+| D8 | lem-ab-intersection | Path A∩B 非空，公共 primitives 验证 |
+| D9 | lem-matrix-reconstruction | 矩阵重构 digest 匹配 |
+| D10 | lem-interval-ldlt | 有理区间 LDLT 分解验证 |
+| D11 | lem-d11-odd-sector | odd sector 积分 checker 通过 |
+| D12 | lem-d12-even-sector | even sector 积分 checker 通过 |
+| D13 | lem-d13-sector-union | odd+even sector 联合验证 |
+| D14 | lem-d14-path-a-remainder | Path A 余项界验证 |
+| D15 | lem-d15-path-b-remainder | Path B 余项界验证（独立方法） |
+| D16 | lem-d16-independence | Path A/B 独立性机器检查通过 |
+| D17 | lem-d17-enclosure | 最终区间包含关系 |
+| D18 | thm-main-radius-030 | 主定理：certified radius ≥ 0.30 |
+
+### 具体任务
+
+**T-M28-1：domains/ 目录结构**
+- 新建 `domains/weil/contracts/`（18 个 ContractV2 JSON）
+- 新建 `domains/weil/policy-v2.json`
+- 新建 `domains/weil/independence.json`
+
+**T-M28-2：ContractV2 JSON 文件**
+- 每个文件对应一个 claim，声明：statement_digest、obligations、checker、runtime、assurance、evidence mode
+- checker 使用占位 digest（后续 pin checker 时填入真实 digest）
+- runtime.class = "native-dev"（开发阶段），assurance = ["deterministic-cap"]
+
+**T-M28-3：Weil policy v2**
+- `forbidden_runtimes: ["shadow"]`（禁止 shadow 结果进 release）
+- `required_assurances` 声明每类 claim 需要的 assurance
+- 向后兼容 v1 policy（不删除旧文件）
+
+**T-M28-4：defects.go 补全 D11–D17**
+- 在 `internal/weil/defects.go` 补充 D11–D17 的 Defect 条目
+
+**T-M28-5：contract lint CI 检查**
+- 在 pre-commit hook 和 CI 中加入 `proofctl contract lint` 对所有 domains/weil/contracts/*.json 的批量检查
+
+### 出口闸门
+
+- `domains/weil/contracts/` 下 18 个文件全部通过 `proofctl contract lint`
+- `domains/weil/policy-v2.json` 可被 policy.ReleasePolicy 解析
+- `internal/weil/defects.go` 包含 D1–D18 全部条目
+- `go test ./...` 通过
 
 ---
 

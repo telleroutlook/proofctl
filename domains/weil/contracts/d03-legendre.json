@@ -1,0 +1,28 @@
+{
+  "contract_version": "2",
+  "claim_id": "lem-d3-legendre",
+  "statement_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "dependencies": [{"claim_id":"lem-d2-weil-reduction","required_state":"GLOBALLY_VERIFIED","statement_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222"}],
+  "evidence": {
+    "mode": "joint",
+    "required": []
+  },
+  "checker": {
+    "protocol": "proofctl-checker/v2",
+    "checker_digest": "sha256:c030000000000000000000000000000000000000000000000000000000000000",
+    "schema_digest": "sha256:s030000000000000000000000000000000000000000000000000000000000000"
+  },
+  "runtime": {
+    "class": "native-dev",
+    "network": "none"
+  },
+  "obligations": ["d3.legendre-symbols-computed","d3.legendre-values-independent"],
+  "assurance": {
+    "required": ["deterministic-cap"]
+  },
+  "replay": {
+    "semantic": "required",
+    "byte_exact": "not_required"
+  },
+  "independence": {}
+}
