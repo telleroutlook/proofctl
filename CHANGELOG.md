@@ -6,6 +6,24 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.2.8] — 2026-08-04
+
+### Fixed
+
+- **B23**: `policy.Evaluate` contained a duplicate assurance allowed/forbidden check that
+  diverged from the canonical C03 check in `conditions.go`. The duplicate lacked the
+  empty-assurance skip introduced in v0.2.7, causing `proofctl release` to emit spurious
+  blockers even after the C03 fix. Assurance enforcement is now exclusively handled by
+  C03; `policy.Evaluate` only checks `required_claims`.
+- **B24**: Integration tests (`integration_test.go`) were never executed by CI or locally
+  because the `//go:build integration` constraint requires `-tags integration`, which was
+  absent from all `go test` invocations. CI now runs `go test -tags integration ./...`;
+  `CONTRIBUTING.md` command corrected accordingly.
+- `coverage.out` (CI artefact) removed from git tracking; added to `.gitignore`.
+- Version strings in `SECURITY.md` and `PLAN.md` aligned with `CHANGELOG.md` (`v0.2.7`).
+
+---
+
 ## [v0.2.7] — 2026-08-04
 
 ### Fixed
