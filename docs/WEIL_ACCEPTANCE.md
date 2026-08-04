@@ -9,32 +9,34 @@ claim IDs and checker requirements, and defines what "shadow mode" means.
 
 ## Defect Catalogue: D1–D18
 
-The following table maps each Weil defect to its corresponding claim ID,
-the checker that must verify it, and the minimum assurance type required.
+The following table maps each Weil defect to its claim ID in the ProofGraph,
+the checker obligation, and the minimum assurance type required.
+This table is authoritative — `internal/weil/defects.go` and `domains/weil/contracts/`
+must stay in sync with it.
 
-| Defect | Claim ID                   | Description                                         | Min Assurance           |
-|--------|----------------------------|-----------------------------------------------------|-------------------------|
-| D1     | `lem-d1-normalization`     | Normalization factor N satisfies 0 < N <= 1         | `formal-kernel`         |
-| D2     | `lem-d2-weil-reduction`    | Weil reduction step preserves the invariant         | `formal-kernel`         |
-| D3     | `lem-d3-legendre`          | Legendre symbol computation is correct              | `formal-kernel`         |
-| D4     | `lem-d4-kernel-bound`      | Kernel bound holds for all inputs in domain         | `formal-kernel`         |
-| D5     | `lem-d5-log-moments`       | Log-moment estimates are within declared tolerance  | `deterministic-cap`     |
-| D6     | `lem-d6-path-a-stability`  | Path A is stable under the perturbation bound       | `deterministic-cap`     |
-| D7     | `lem-d7-path-b-stability`  | Path B is stable under the perturbation bound       | `deterministic-cap`     |
-| D8     | `lem-d8-intersection-bound`| Path A and Path B intersection measure is bounded   | `formal-kernel`         |
-| D9     | `lem-d9-matrix-rank`       | Reconstruction matrix has full rank                 | `deterministic-cap`     |
-| D10    | `lem-d10-ldlt-stability`   | L-D-L^T factorization is numerically stable         | `exact-replay`          |
-| D11    | `lem-d11-interval-bound`   | Interval arithmetic bound is tight                  | `deterministic-cap`     |
-| D12    | `lem-d12-error-term`       | Error term is dominated by the main term            | `formal-kernel`         |
-| D13    | `lem-d13-summation`        | Summation interchange is justified                  | `formal-kernel`         |
-| D14    | `lem-d14-contour`          | Contour deformation is valid                        | `formal-kernel`         |
-| D15    | `lem-d15-residue`          | Residue computation matches the formal derivation   | `formal-kernel`         |
-| D16    | `lem-d16-convergence`      | Series convergence holds in the stated region       | `formal-kernel`         |
-| D17    | `lem-d17-frozen-model`     | Frozen model assumptions are internally consistent  | `independent-review`    |
-| D18    | `lem-d18-data-provenance`  | Input data provenance chain is unbroken             | `reproducible-computation` |
+| Defect | Claim ID                     | Description                                                      | Min Assurance       |
+|--------|------------------------------|------------------------------------------------------------------|---------------------|
+| D1     | `lem-d1-normalization`       | Input primitives normalization verified by checker               | `deterministic-cap` |
+| D2     | `lem-d2-weil-reduction`      | Weil explicit formula reduction step formally verified           | `deterministic-cap` |
+| D3     | `lem-d3-legendre`            | Legendre symbol computation independently checked                | `deterministic-cap` |
+| D4     | `lem-d4-kernel-bound`        | Kernel bound: expected primitive set fully matched               | `deterministic-cap` |
+| D5     | `lem-d5-log-moments`         | Log-moment integrals verified with frozen parameter set          | `deterministic-cap` |
+| D6     | `lem-path-a-primitives`      | Path A primitive integral set complete and verified              | `deterministic-cap` |
+| D7     | `lem-path-b-primitives`      | Path B primitive integral set complete and verified              | `deterministic-cap` |
+| D8     | `lem-ab-intersection`        | Path A∩B non-empty; common primitives jointly verified           | `deterministic-cap` |
+| D9     | `lem-matrix-reconstruction`  | Matrix reconstruction checker-confirmed against certificate      | `deterministic-cap` |
+| D10    | `lem-interval-ldlt`          | Rational interval LDLT decomposition verified                    | `deterministic-cap` |
+| D11    | `lem-d11-odd-sector`         | Odd sector integrals verified by checker                         | `deterministic-cap` |
+| D12    | `lem-d12-even-sector`        | Even sector integrals verified by checker                        | `deterministic-cap` |
+| D13    | `lem-d13-sector-union`       | Odd+even sector union jointly verified, full range covered       | `deterministic-cap` |
+| D14    | `lem-d14-path-a-remainder`   | Path A remainder bound verified by approved method               | `deterministic-cap` |
+| D15    | `lem-d15-path-b-remainder`   | Path B remainder bound independently verified (different method) | `deterministic-cap` |
+| D16    | `lem-d16-independence`       | Path A/B machine-verified: distinct checker digests, no shared forbidden artifacts | `deterministic-cap` |
+| D17    | `lem-d17-enclosure`          | Final interval enclosure confirmed; radius lower bound holds     | `deterministic-cap` |
+| D18    | `thm-main-radius-030`        | Main theorem: certified radius ≥ 0.30; all proof obligations closed | `deterministic-cap` |
 
-Defects D6–D18 expand the required claims set beyond the initial release policy
-and will be added in subsequent policy versions.
+Each defect has a corresponding `ContractV2` in `domains/weil/contracts/d<N>-*.json`.
+All 18 contracts pass `proofctl contract lint`.
 
 ## Release Conditions for `thm-main-radius-030`
 

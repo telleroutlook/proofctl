@@ -3,15 +3,62 @@
 ## Overview
 
 Checkers are external processes that verify mathematical claims. They communicate
-with the proofctl engine via a simple stdin/stdout JSON protocol. This document
-defines the protocol version 1 interface.
+with the proofctl engine via a simple stdin/stdout JSON protocol.
 
-The protocol is designed to be:
+Two protocol versions are supported:
+
+- **Protocol v1** (`protocol_version: 1`) — legacy; checker returns `outcome` and
+  `assurance` fields. Used by existing CAP, LRAT, Metamath, Lean, Coq, SMT, and
+  Isabelle bridges. The v1 path is preserved for backward compatibility.
+- **Protocol v2** (`protocol_version: 2`) — v2 kernel path; checker returns only
+  `obligation_results` (per-obligation `pass`/`fail` verdicts). No `outcome` or
+  `assurance` fields are allowed — these are derived by proofverify from the
+  Contract and runtime (INV-01, INV-05). The v2 path is activated when
+  `checkerID.ProtocolVersion == 2` in graph.json.
+
+Both protocol versions are:
 - **Deterministic**: the same inputs must always produce the same output.
 - **Isolated**: checkers must not modify any input files or the CAS.
 - **Fail-closed**: any ambiguous or missing output is treated as an error, not a pass.
 
-## Invocation
+## Protocol v2 (recommended for new checkers)
+
+### Output format
+
+```json
+{
+  "protocol_version": 2,
+  "claim_id": "lem-d1-normalization",
+  "input_closure_digest": "sha256:...",
+  "checker_identity_digest": "sha256:...",
+  "runtime_identity_digest": "sha256:...",
+  "evidence_used": ["sha256:..."],
+  "obligation_results": [
+    {"id": "d1.normalization-schema-valid", "verdict": "pass", "method": "arb-v1"},
+    {"id": "d1.primitive-set-complete",     "verdict": "pass", "witness_digest": "sha256:..."}
+  ],
+  "toolchain": {"python": "3.13.5", "flint": "3.x"}
+}
+```
+
+**Key invariants (INV-01/INV-06):**
+- `obligation_results` must contain EXACTLY the IDs declared in the Contract
+  (no missing, no extra, no duplicates) — `ValidateOutput` enforces this.
+- Verdict must be `"pass"` or `"fail"` only — `"accepted"`, `"verified"`, `"ok"`
+  are invalid and rejected.
+- No `outcome` or `assurance` fields — the checker cannot assert claim acceptance.
+
+### Strict rejection rules (Canvas §8.3)
+
+`proofctl check` rejects v2 output with the following codes:
+- `PROTOCOL_VERSION` — version mismatch
+- `CLAIM_ID_MISMATCH` — claim_id not echoed
+- `OBLIGATION_MISSING` — expected obligation absent
+- `OBLIGATION_EXTRA` — unexpected obligation present
+- `OBLIGATION_DUPLICATE` — same ID appears twice
+- `VERDICT_INVALID` — verdict not "pass" or "fail"
+
+## Protocol v1 (legacy)
 
 The engine invokes a checker as a subprocess:
 

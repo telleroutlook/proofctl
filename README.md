@@ -1,4 +1,4 @@
-# proofctl — Mathematical Proof Platform
+# proofctl — Mathematical Proof Certification Platform
 
 `proofctl` is a content-addressed, evidence-aware, fail-closed **mathematical proof certification platform**. It provides the infrastructure layer for computer-assisted proof (CAP) projects: DAG management, content-addressed storage, attestation chains, freshness tracking, and a release gate.
 
@@ -7,7 +7,7 @@ Mathematical projects provide:
 2. A **domain checker** — any executable that verifies a certificate file
 3. A **release policy** (`policies/*.json`) — declares which claims and metadata keys must be satisfied
 
-proofctl provides everything else.
+proofctl provides everything else: orchestration, caching, signing, mutation testing, bundle creation, and offline verification via `proofverify`.
 
 ## Try it now — self-contained demo
 
@@ -54,7 +54,7 @@ in place. From the `weil-lower-bound` directory:
 # The env var is expanded in graph.json checker cmd entries at runtime.
 export PROOFCTL_ADAPTERS=/path/to/proofctl/adapters
 
-proofctl status          # shows 12 claims, 7 accepted
+proofctl status          # shows 18 claims (D1–D18)
 proofctl graph           # shows full DAG
 proofctl release --dry-run   # lists all unmet conditions
 ```
@@ -70,6 +70,14 @@ proofctl domains list
 | `cap`  | yes    | Computer-Assisted Proof via JSON certificate + standalone checker |
 | `lrat` | —      | LRAT SAT solver: formula → unsat → verified 3-claim graph |
 | `qmd`  | —      | Quarto/Pandoc: extract claims from `<div class="claim">` blocks |
+| `metamath` | yes | Metamath formal proof: verify .mm files via metamath checker |
+| `lean` | yes    | Lean 4 formal proof: lake build + `-- claim:` annotations |
+| `coq`  | yes    | Coq/Rocq: coqchk + `(* claim: *)` annotations, BatchGroup mode |
+| `smt`  | yes    | SMT/Alethe/DRAT: proof checker accepts + unsat witness |
+| `isabelle` | yes | Isabelle/HOL: isabelle build session, AFP toolchain tracking |
+
+Each domain has a `domains/<name>/` directory with ContractV2 JSON files and `policy-v2.json`,
+all validated by `proofctl contract lint`.
 
 ## Build
 
@@ -85,38 +93,59 @@ Requires Go 1.22 or later. A pre-commit hook that runs all checks is installed a
 ## Project Layout
 
 ```
-cmd/proofctl/          CLI entry point (17 subcommands)
+cmd/
+  proofctl/          CLI entry point (20+ subcommands)
+  proofverify/       Minimal offline verification binary (no network, no subprocess)
 internal/
-  ir/                  Intermediate representation types and strict decoder
-  dag/                 Claim DAG (validation, closure, impact, frontier)
-  cas/                 Content-addressed blob store (sha256, atomic writes)
-  checker/             Checker identity pinning and cache-key derivation
-  runner/              Checker runner interface and native subprocess runner
-  freshness/           File-level freshness snapshots and drift detection
-  policy/              Release policy evaluation (required_claims, assurances, metadata keys)
-  attestation/         Attestation combination and self-digest
-  status/              Global status projection over the claim graph
-  release/             Release gate (dry-run + atomic STATUS.json write + release-snapshot.json, 4 universal conditions)
-  snapshot/            Point-in-time immutable graph snapshots
-  compile/             Source compiler (JSON → ProofGraph IR)
-  config/              .proofctl project directory management
-  scaffold/            Domain scaffolding (Go embed: templates + bridge.py)
-  weil/                Weil-domain defect table and shadow attestations
-  lrat/                LRAT SAT domain types
-pkg/protocol/          Public wire types for external checker processes (stable API)
+  kernel/            v2 trusted kernel (stdlib only — no domain imports)
+    identity/        ClaimIdentity closure (INV-09)
+    attestation/     AttestationV2 validation (INV-02/03/04)
+    derive/          State machine (INV-06/07/08/09)
+    contract/        ContractV2 lint (INV-06 obligation exact-set)
+    policy/          PolicyV2 key authorization (INV-04)
+    bundle/          Release bundle types (INV-12)
+  ir/                Intermediate representation types and strict decoder
+  dag/               Claim DAG (validation, closure, impact, frontier)
+  cas/               Content-addressed blob store (sha256, atomic writes)
+  checker/           Checker identity pinning and cache-key derivation
+  runner/            Checker runner interface, NativeRunner, BatchRunner
+  freshness/         File-level freshness snapshots and drift detection
+  policy/            Release policy evaluation (v1: required_claims, assurances, metadata)
+  release/           Release gate: C01–C09 conditions + STATUS.json
+  verify/            Full verification pipeline (cache, freshness, v1+v2 checker paths)
+  signing/           Ed25519 key management and attestation signing
+  scaffold/          Domain scaffolding (Go embed: templates + bridge.py)
+  weil/              Weil D1–D18 defect table and shadow attestations
+  lrat/              LRAT SAT domain types
+pkg/
+  protocol/          v1 wire types (stable API, backward compatible)
+  protocol/v2/       v2 wire types (CheckerOutputV2, no Outcome/Assurance fields)
+domains/
+  weil/              D1–D18 ContractV2 + policy-v2.json + independence manifest
+  metamath/          ContractV2 + policy-v2.json
+  lean/              ContractV2 + policy-v2.json
+  coq/               ContractV2 + policy-v2.json
+  smt/               ContractV2 + policy-v2.json
+  isabelle/          ContractV2 + policy-v2.json
 adapters/
-  cap/                 CAP bridge: proofctl wire protocol ↔ python checker (bridge.py)
-  weil/                Weil claim graph adapter (shadow mode)
-  qmd/                 Quarto/Pandoc QMD adapter
-  lrat/                LRAT problem spec adapter
-  lean/                Lean 4 adapter (stub)
+  cap/               CAP bridge: proofctl wire protocol ↔ python checker (bridge.py)
+  weil/              Weil claim graph adapter (shadow mode)
+  qmd/               Quarto/Pandoc QMD adapter
+  lrat/              LRAT problem spec adapter
+  lean/              Lean 4 adapter (lake build + -- claim: annotations)
+  coq/               Coq/Rocq adapter (coqchk + (* claim: *) annotations)
+  smt/               SMT/Alethe/DRAT adapter (3-claim pattern)
+  isabelle/          Isabelle/HOL adapter (session build)
+  metamath/          Metamath adapter ($p statement extraction)
 policies/
-  weil-release-v1.json Weil domain release policy (12 claims + 9 metadata keys)
-  lrat-release-v1.json LRAT domain release policy (placeholder)
-schemas/               JSON Schema draft-07 for all wire types
-docs/                  Design docs, ADRs, protocol specification
-examples/              Integration examples
-testdata/              Golden outputs, adversarial inputs, fuzz corpora
+  weil-release-v1.json    Weil v1 release policy
+  lrat-release-v1.json    LRAT v1 release policy
+testdata/
+  adversarial/       INV-01–INV-12 adversarial tests + core generality test
+  mutation/          Platform mutation fixtures (kill rate = 100%)
+schemas/             JSON Schema draft-07 for all wire types
+docs/                Design docs, ADRs, protocol specification
+examples/            Integration examples
 ```
 
 ## Release Policy Format
@@ -164,6 +193,7 @@ Every `proofctl release` evaluates:
 | `C06-metadata-values` | No metadata value outside allowed set (when `allowed_metadata_values`) | Conditional |
 | `C07-conditional-metadata` | Required key present when trigger key found (when `conditional_metadata_keys`) | Conditional |
 | `C08-replay-mode` | All attestations match required replay mode (when `required_replay_mode`) | Conditional |
+| `C09-no-native-runtime` | No native/dev runtime in release closure — INV-10 (when `forbidden_runtimes`) | Conditional |
 | `meta:<key>` × N | Each `required_metadata_keys` entry present | Domain-specific |
 
 ## Cold-Start Replay
@@ -269,7 +299,30 @@ proofctl cas gc --yes                               # delete unreferenced blobs 
 
 Exit 0 if all checks pass, exit 1 otherwise — safe to use in CI as `proofctl doctor || exit 1`.
 
+## v2 Kernel Commands
 
+```bash
+# ContractV2 lint — validates all required fields
+proofctl contract lint domains/weil/contracts/d01-normalization.json
+
+# Batch lint all domain contracts
+for f in domains/*/contracts/*.json; do proofctl contract lint "$f"; done
+
+# Identity closure — shows ClaimIdentityInputs + digest for a claim
+proofctl identity @thm-main-radius-030
+
+# Mutation testing — platform catalog, exit 1 if kill rate < 100%
+proofctl mutate
+
+# Release bundle — create and verify
+proofctl bundle create --output dist/bundle
+proofctl bundle verify dist/bundle
+
+# Offline verification (separate proofverify binary)
+proofverify bundle.verify dist/bundle
+```
+
+## Release Artifacts
 
 On a successful `proofctl release`, in addition to `.proofctl/STATUS.json`,
 proofctl writes `.proofctl/release-snapshot.json` with richer per-evidence metadata

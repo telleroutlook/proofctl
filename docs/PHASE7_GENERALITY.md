@@ -1,21 +1,36 @@
-# Phase 7: Second-Domain Generality Report
+# Multi-Domain Generality Report
 
-**Date:** 2026-08-03
-**Status:** VERIFIED (in test)
-**Second domain:** LRAT SAT proof certificates
+**Date:** 2026-08-04
+**Status:** VERIFIED
+**Domains verified:** LRAT, Metamath, Lean 4, Coq/Rocq, SMT/Alethe, Isabelle/HOL
 
 ---
 
 ## Objective
 
-Phase 7 proves the ProofGraph engine is NOT a Weil-specific wrapper.
-The engine must connect a second, structurally unrelated proof domain without
-modifying the core IR, CAS, status machine, or release gate.
+This report confirms that the ProofGraph engine is domain-agnostic. Adding any new
+proof domain requires ZERO changes to the core IR, CAS, status machine, or release gate.
+All domain-specific logic lives in `adapters/<domain>/` and `domains/<domain>/`.
 
-The chosen second domain is **LRAT SAT proof certificates**.
-LRAT (Linear Rat) is a standard format for machine-checkable UNSAT proofs.
-An LRAT certificate proves that a CNF (Boolean satisfiability) formula is
-unsatisfiable. This is completely different from Weil's numerical analysis.
+The machine-readable enforcement is `testdata/adversarial/generality_test.go`:
+`TestCore_NoDomainHardcoding` scans `internal/kernel/`, `internal/release/`, and
+`pkg/protocol/v2/` for domain identifiers and fails CI if any are found.
+
+---
+
+## Domains Active (2026-08-04)
+
+| Domain | Adapter | Bridge | ContractV2 | Policy v2 | scaffold |
+|--------|---------|--------|------------|-----------|----------|
+| `cap`      | ✅ | ✅ | — | — | ✅ |
+| `weil`     | ✅ | ✅ | ✅ D1–D18 | ✅ | ✅ |
+| `lrat`     | ✅ | — | — | — | ✅ |
+| `qmd`      | ✅ | — | — | — | ✅ |
+| `metamath` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lean`     | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `coq`      | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `smt`      | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `isabelle` | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 

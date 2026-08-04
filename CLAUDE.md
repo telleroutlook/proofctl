@@ -4,19 +4,36 @@
 
 proofctl is a **mathematical proof certification platform** (not a Weil-specific tool).
 The core engine (`internal/`) has zero domain knowledge. Domain specifics live in
-`adapters/`, `internal/weil/`, `internal/lrat/`, and policy JSON files.
+`adapters/`, `domains/`, `internal/weil/`, `internal/lrat/`, and policy JSON files.
 
 ## Architecture invariants
 
-- `internal/` packages must import zero domain-specific packages outside `internal/weil`
-  and `internal/lrat`. Adding Weil/LRAT logic to `internal/dag`, `internal/release`,
+- `internal/kernel/` packages must import ONLY Go stdlib. No domain, orchestrator, or
+  runner imports. Verified by `go list -deps ./internal/kernel/...` in CI.
+- `internal/` packages (outside `internal/weil` and `internal/lrat`) must import zero
+  domain-specific packages. Adding Weil/LRAT logic to `internal/dag`, `internal/release`,
   `internal/policy`, etc. is forbidden.
-- Release conditions C01–C04 are universal and fixed. Domain-specific conditions come
-  exclusively from `policy.RequiredMetadataKeys` in the policy JSON — never from Go constants.
+- Release conditions C01–C09 are universal or policy-driven. Domain-specific conditions
+  come exclusively from `policy.RequiredMetadataKeys` in the policy JSON — never from
+  Go constants. C09 (`ForbiddenRuntimes`) is activated via `policy.ForbiddenRuntimes`.
 - `adapters/cap/bridge.py` and `internal/scaffold/bridge.py` must stay in sync (bridge.py
   is the canonical source; scaffold embeds it for `proofctl init --domain cap`).
 - `internal/scaffold/bridge.py` is embedded via `//go:embed`. Any change to bridge.py
   requires rebuilding the binary.
+- `testdata/adversarial/generality_test.go` scans `internal/kernel/`, `internal/release/`,
+  and `pkg/protocol/v2/` for domain-specific identifiers — CI fails if any are found.
+
+## v2 kernel architecture
+
+The v2 trusted kernel lives in `internal/kernel/`:
+- `identity/` — ClaimIdentity closure (sha256 of canonical inputs, INV-09)
+- `attestation/` — AttestationV2 validation (self-digest, identity binding, signature, INV-02/03/04)
+- `derive/` — State machine (OPEN→CANDIDATE→LOCALLY_VERIFIED→GLOBALLY_VERIFIED→REPRODUCIBLE→RELEASED→STALE→BLOCKED)
+- `contract/` — ContractV2 lint (LintContract, INV-06 obligation exact-set)
+- `policy/` — PolicyV2 (KeyAuth, role-assurance-runtime authorization, INV-04)
+- `bundle/` — Release bundle types (Manifest, VerificationResult, INV-12)
+
+`cmd/proofverify` is the offline verification binary — no network, no subprocess, no auto-repair.
 
 ## Go conventions
 
@@ -31,26 +48,30 @@ The core engine (`internal/`) has zero domain knowledge. Domain specifics live i
 
 - `bridge.py` is stdlib only — no imports outside the standard library
 - Never add `float()` calls; all numeric values stay as strings passed through from certificates
-- `BRIDGE_CHECKER` env var is the only configuration surface; no config files
+- `BRIDGE_CHECKER` env var is the only configuration surface for CAP bridge; no config files
+- bridge.py exit codes: 0=certified, 1=uncertified, 2=unavailable, 3=protocol error
+
+## Domain conventions
+
+- Every domain gets its own `domains/<name>/` directory with ContractV2 JSON + `policy-v2.json`
+- Every ContractV2 must pass `proofctl contract lint` — CI enforces this via `domains-lint` job
+- Known domains: cap, lrat, qmd, metamath, lean, coq, smt, isabelle, weil
+- `scaffold.KnownDomains` is the single registry — add new domains here, not in cmd files
+- `proofctl init --domain <name>` must be idempotent (no-op if files already exist)
 
 ## Policy JSON conventions
 
-- Every new domain gets its own policy file in `policies/<domain>-v1.json`
-- `required_metadata_keys` lists the keys that `adapters/cap/bridge.py` (or equivalent)
-  populates on checker exit 0; keep them in sync with the bridge
-- `target` must be the root theorem claim ID (the single claim that represents "proof complete")
-
-## Scaffold conventions
-
-- Templates live in `internal/scaffold/templates/`; bridge lives at `internal/scaffold/bridge.py`
-- `scaffold.KnownDomains` is the single registry — add new domains here, not in cmd files
-- `proofctl init --domain <name>` must be idempotent (no-op if files already exist)
+- v1 policy files: `policies/<domain>-v1.json` (legacy, backward compatible)
+- v2 policy files: `domains/<domain>/policy-v2.json` (includes `forbidden_runtimes`, `forbidden_assurances`)
+- `required_metadata_keys` lists the keys that the bridge populates on checker exit 0
+- `target` must be the root theorem claim ID
+- `forbidden_runtimes: ["shadow", "native-dev"]` prevents development results entering release (C09)
 
 ## weil-lower-bound integration
 
 - `graph.json`, `policies/weil-cap-v1.json`, `.proofctl/config.json` are in the
   weil-lower-bound repo (not here)
-- The 12-claim DAG mirrors `internal/weil/defects.go` — if defects.go changes,
+- The claim DAG mirrors `internal/weil/defects.go` (D1–D18) — if defects.go changes,
   update weil-lower-bound/graph.json accordingly
 - `BRIDGE_CHECKER` for weil: `python3 checker/check_certificate.py`
 - checker `cmd` in graph.json uses `${PROOFCTL_ADAPTERS}/cap/bridge.py` — never
@@ -69,16 +90,22 @@ The core engine (`internal/`) has zero domain knowledge. Domain specifics live i
   reports which evidence is missing from CAS and whether path_hint can auto-import
 - On partial failure, a debug record `<claim-id>-replay-partial.json` is written
   to `.proofctl/attestations/` showing per-evidence pass/fail with detailed reasons
-- `bridge.py` exit codes: 0=certified, 1=uncertified, 2=malformed cert, 3=protocol error
-  (missing BRIDGE_CHECKER env var → exit 3, not exit 2, to prevent useless backoff retries)
+
+## release conventions
+
+- `proofctl release` evaluates C01–C09 conditions + domain metadata conditions
+- `release --fix` was removed (Canvas §14: blockers must be fixed before release, not auto-repaired)
+- `release --dry-run` is the safe path: evaluates conditions without writing STATUS.json
+- C09 (`no-native-runtime`) is activated when `policy.ForbiddenRuntimes` is non-empty
+- proofverify is the offline verifier: `proofverify bundle.verify <bundle-dir>`
 
 ## status conventions
 
 - `proofctl status` reads `release_target` from the policy file automatically
-  (via `cfg.PolicyFile` in `.proofctl/config.json`) — no manual wiring needed
 - OPEN claims show distinguishing reason: `(no attestation)` vs `(no evidence registered)`
 - Zero/placeholder `statement.digest` (all-zeros sha256) is flagged `[UNVERIFIED_DIGEST]`;
   fix with `proofctl compile --fix-digests <source-file>`
+- `proofctl status --verbose` shows toolchain versions for accepted claims
 
 ## doctor conventions
 
@@ -86,6 +113,20 @@ The core engine (`internal/`) has zero domain knowledge. Domain specifics live i
   BRIDGE_CHECKER executable (uses exec.LookPath for bare names like `python3`),
   PROOFCTL_ADAPTERS set if needed by graph.json, checker pinned, CAS non-empty
 - Exit 0 = all pass; exit 1 = any fail; safe to use as `proofctl doctor || exit 1` in CI
+
+## mutation testing conventions
+
+- `proofctl mutate` runs the platform mutation catalog against current validators
+- Kill rate must be 100%; exit 1 if any mutation survives
+- Mutation fixtures live in `testdata/mutation/`; adversarial tests in `testdata/adversarial/`
+- Canvas §13 mandatory mutations: all covered by `testdata/mutation/` + `testdata/adversarial/`
+
+## bundle conventions
+
+- `proofctl bundle create [--output <dir>]` — assembles release bundle (manifest + member digests)
+- `proofctl bundle verify <bundle-dir>` — offline verification of all member digests (INV-12)
+- `proofverify bundle.verify <bundle-dir>` — independent offline verifier (separate binary)
+- Bundle format version must be "2"; format "1" is rejected
 
 ## error message conventions
 
@@ -99,14 +140,13 @@ The core engine (`internal/`) has zero domain knowledge. Domain specifics live i
 
 ## CI conventions
 
-- CI runs: `go build`, `go vet`, `gofmt -l`, bridge.py sync check, `staticcheck`, 
+- CI runs: `go build`, `go vet`, `gofmt -l`, bridge.py sync check, `staticcheck`,
   `golangci-lint`, `govulncheck`, `go test`, `go test -race`
+- CI also runs: `domains-lint` job (lints all domains/*/contracts/*.json + metamath smoke test)
 - The pre-commit hook at `.git/hooks/pre-commit` runs the same checks locally
-- The hook is not checked into git (it lives in `.git/hooks/`); new clones must
-  copy it manually or run `cp .git/hooks/pre-commit.sample .git/hooks/pre-commit`
-  (note: the hook is written fresh on each dev machine)
+- Release workflow: `release.yml` builds proofctl + proofverify for 4 platforms on tag push
 
-
+## release artifacts
 
 - `.proofctl/STATUS.json` — written by `proofctl release` (always, pass or fail)
 - `.proofctl/release-snapshot.json` — written by `proofctl release` on pass only;
