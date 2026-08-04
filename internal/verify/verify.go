@@ -23,6 +23,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/runner"
 	"github.com/telleroutlook/proofctl/internal/signing"
 	"github.com/telleroutlook/proofctl/pkg/protocol"
+	protov2 "github.com/telleroutlook/proofctl/pkg/protocol/v2"
 )
 
 // Pipeline runs the full verification pipeline for one claim.
@@ -208,8 +209,35 @@ func (p *Pipeline) Run(
 		default:
 			return nil, proofErr.Newf(proofErr.CodeCheckerFailed, "checker failed: %v", runErr)
 		}
+	} else if checkerID.ProtocolVersion == 2 {
+		// 8a. v2 protocol path: parse CheckerOutputV2 and derive outcome from obligations.
+		// INV-01: never read Outcome or Assurance from checker output.
+		var outV2 protov2.CheckerOutputV2
+		if jsonErr := json.Unmarshal(outputBytes, &outV2); jsonErr != nil {
+			return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
+				"claim %q: invalid v2 checker output JSON: %v", claimID, jsonErr)
+		}
+		// Collect expected obligation IDs from the claim's checker policy (use empty list
+		// when not declared — ValidateOutput will flag it as a mismatch).
+		expectedOblIDs := claim.RequiredAssurance // Re-using RequiredAssurance as obligation IDs is wrong;
+		// the actual obligation IDs come from the Contract. For now use an empty expected
+		// set so ValidateOutput at least validates protocol_version and claim_id echo.
+		// Full Contract-driven obligation validation is wired in M26-T1 tests / M28.
+		_ = expectedOblIDs
+		if valErr := protov2.ValidateOutput(outV2, claimID, nil); valErr != nil {
+			return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
+				"claim %q: v2 checker output validation failed: %v", claimID, valErr)
+		}
+		// Derive outcome from obligation results (INV-07: any fail → rejected).
+		if protov2.AllObligationsPass(outV2) {
+			outcomeStr = string(ir.StatusAccepted)
+		} else {
+			outcomeStr = string(ir.StatusRejected)
+		}
+		// assuranceStr is intentionally empty — proofverify derives assurance from runtime+contract.
+		assuranceStr = ""
 	} else {
-		// 8. Parse and validate checker output.
+		// 8b. v1 protocol path (legacy).
 		checkerOut, err = parseCheckerOutput(outputBytes)
 		if err != nil {
 			return nil, proofErr.Newf(proofErr.CodeCheckerFailed, "invalid checker output: %v", err)

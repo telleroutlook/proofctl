@@ -37,6 +37,10 @@ type ReleasePolicy struct {
 	// RequiredReplayMode, if set, requires that all attestations carry the specified
 	// replay_mode value. Accepted values: "from_scratch", "self_consistency".
 	RequiredReplayMode string `json:"required_replay_mode,omitempty"`
+	// ForbiddenRuntimes lists runtime Kind values that must not appear in any
+	// attestation contributing to release (INV-10). Typically ["native", "native-dev"].
+	// Use this to prevent development-only checker results from reaching a formal release.
+	ForbiddenRuntimes []string `json:"forbidden_runtimes,omitempty"`
 }
 
 // Evaluate checks whether all required claims are accepted, no forbidden assurance types

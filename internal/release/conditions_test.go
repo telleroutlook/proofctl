@@ -485,3 +485,114 @@ func TestC08ReplayMode_LegacyExempt(t *testing.T) {
 		t.Errorf("C08 should exempt legacy attestations with empty replay_mode, got: %s", c08.Blocker)
 	}
 }
+
+// ── C09: no native runtime ────────────────────────────────────────────────────
+
+func TestC09_NoNativeRuntime_Pass(t *testing.T) {
+	t.Parallel()
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:        "c1",
+			Outcome:        "accepted",
+			Assurance:      ir.AssuranceDeterministicCAP,
+			SelfDigest:     "sha256:abc",
+			StartFreshness: "2026-08-04",
+			EndFreshness:   "2026-08-04",
+			Checker: ir.CheckerIdentity{
+				ID:      "checker-v1",
+				Runtime: ir.Runtime{Kind: "oci"},
+			},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:           "2",
+		AllowedAssurances: []string{"deterministic-cap"},
+		ForbiddenRuntimes: []string{"native", "native-dev"},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	var c09 *release.ConditionResult
+	for i := range results {
+		if results[i].ID == release.CondNoNativeRuntime {
+			c09 = &results[i]
+			break
+		}
+	}
+	if c09 == nil {
+		t.Fatal("C09 condition not found in results")
+	}
+	if !c09.Passed {
+		t.Errorf("C09 should pass for oci runtime, got blocker: %s", c09.Blocker)
+	}
+}
+
+func TestC09_NoNativeRuntime_Fail(t *testing.T) {
+	t.Parallel()
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:        "c1",
+			Outcome:        "accepted",
+			Assurance:      ir.AssuranceDeterministicCAP,
+			SelfDigest:     "sha256:abc",
+			StartFreshness: "2026-08-04",
+			EndFreshness:   "2026-08-04",
+			Checker: ir.CheckerIdentity{
+				ID:      "checker-native",
+				Runtime: ir.Runtime{Kind: "native"}, // forbidden (INV-10)
+			},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:           "2",
+		AllowedAssurances: []string{"deterministic-cap"},
+		ForbiddenRuntimes: []string{"native", "native-dev"},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	var c09 *release.ConditionResult
+	for i := range results {
+		if results[i].ID == release.CondNoNativeRuntime {
+			c09 = &results[i]
+			break
+		}
+	}
+	if c09 == nil {
+		t.Fatal("C09 condition not found in results")
+	}
+	if c09.Passed {
+		t.Error("C09 should fail when native runtime is used (INV-10)")
+	}
+	if c09.Blocker == "" {
+		t.Error("C09 blocker message must not be empty")
+	}
+}
+
+func TestC09_NoNativeRuntime_NotActivatedWhenPolicyEmpty(t *testing.T) {
+	t.Parallel()
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:        "c1",
+			Outcome:        "accepted",
+			Assurance:      ir.AssuranceDeterministicCAP,
+			SelfDigest:     "sha256:abc",
+			StartFreshness: "2026-08-04",
+			EndFreshness:   "2026-08-04",
+			Checker: ir.CheckerIdentity{
+				ID:      "checker-native",
+				Runtime: ir.Runtime{Kind: "native"},
+			},
+		},
+	}
+	// No ForbiddenRuntimes set → C09 must NOT be evaluated.
+	pol := policy.ReleasePolicy{
+		Version:           "1",
+		AllowedAssurances: []string{"deterministic-cap"},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	for _, r := range results {
+		if r.ID == release.CondNoNativeRuntime {
+			t.Error("C09 must not appear in results when ForbiddenRuntimes is empty")
+		}
+	}
+}

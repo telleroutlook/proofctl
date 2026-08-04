@@ -22,6 +22,7 @@ const (
 	CondMetadataValues           ConditionID = "C06-metadata-values"
 	CondConditionalMetadata      ConditionID = "C07-conditional-metadata"
 	CondReplayMode               ConditionID = "C08-replay-mode"
+	CondNoNativeRuntime          ConditionID = "C09-no-native-runtime"
 )
 
 // ConditionResult records whether one release condition passed.
@@ -39,13 +40,14 @@ type ConditionResult struct {
 // Conditional: C06 (metadata values) — only when policy.AllowedMetadataValues is set.
 // Conditional: C07 (conditional metadata keys) — only when policy.ConditionalMetadataKeys is set.
 // Conditional: C08 (replay mode) — only when policy.RequiredReplayMode is set.
+// Conditional: C09 (no native runtime) — only when policy.ForbiddenRuntimes is set (INV-10).
 // Domain conditions: one condition per key in pol.RequiredMetadataKeys.
 func EvaluateConditions(
 	graph *dag.DAG,
 	attestations map[string]*ir.Attestation,
 	pol policy.ReleasePolicy,
 ) []ConditionResult {
-	results := make([]ConditionResult, 0, 8+len(pol.RequiredMetadataKeys))
+	results := make([]ConditionResult, 0, 9+len(pol.RequiredMetadataKeys))
 	results = append(results, checkC01GlobalStatus(graph, attestations))
 	results = append(results, checkC02AssumptionFootprint(attestations))
 	results = append(results, checkC03AssurancesAllowed(attestations, pol))
@@ -61,6 +63,9 @@ func EvaluateConditions(
 	}
 	if pol.RequiredReplayMode != "" {
 		results = append(results, checkC08ReplayMode(attestations, pol.RequiredReplayMode))
+	}
+	if len(pol.ForbiddenRuntimes) > 0 {
+		results = append(results, checkC09NoNativeRuntime(attestations, pol.ForbiddenRuntimes))
 	}
 	for _, key := range pol.RequiredMetadataKeys {
 		results = append(results, checkMetadataKey(attestations, key))
@@ -350,4 +355,33 @@ func checkC08ReplayMode(attestations map[string]*ir.Attestation, required string
 		}
 	}
 	return ConditionResult{ID: CondReplayMode, Passed: true}
+}
+
+// checkC09NoNativeRuntime enforces that no attestation in the release closure was
+// produced by a native (unisolated) runtime (INV-10).
+//
+// forbiddenKinds is typically []string{"native", "native-dev"} from policy.ForbiddenRuntimes.
+// Any attestation whose Checker.Runtime.Kind appears in forbiddenKinds blocks release.
+func checkC09NoNativeRuntime(attestations map[string]*ir.Attestation, forbiddenKinds []string) ConditionResult {
+	forbidden := make(map[string]bool, len(forbiddenKinds))
+	for _, k := range forbiddenKinds {
+		forbidden[k] = true
+	}
+
+	var violations []string
+	for claimID, att := range attestations {
+		kind := att.Checker.Runtime.Kind
+		if forbidden[kind] {
+			violations = append(violations,
+				fmt.Sprintf("%s: runtime.kind=%q is forbidden for release (INV-10)", claimID, kind))
+		}
+	}
+	if len(violations) > 0 {
+		return ConditionResult{
+			ID:      CondNoNativeRuntime,
+			Passed:  false,
+			Blocker: "C09: native runtime in release closure: " + strings.Join(violations, "; "),
+		}
+	}
+	return ConditionResult{ID: CondNoNativeRuntime, Passed: true}
 }

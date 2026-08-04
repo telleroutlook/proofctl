@@ -1143,58 +1143,71 @@ T47–T51 互相无依赖，可并行执行
 
 ---
 
-## Milestone 24 — 冻结扩张与 Truth Reset（2026-08-04）
+## Milestone 24 — 冻结扩张与 Truth Reset（2026-08-04）✅
 
 **背景：** 参见《proofctl 可信证明发布内核彻底改造执行 Canvas》（2026-08-04）。
 当前 checker 可直接在输出 JSON 中写 `"outcome": "accepted"` 和 `"assurance": "deterministic-cap"`，状态机信任 attestation 字段而非从不可变输入重新推导。"伪 PASS"在当前数据结构上完全可表示。
 本 Milestone 建立 v2 命名空间骨架、adversarial test skeleton，并在代码中标注 v1/v2 分界。
 
-### 目标产出
+### 完成产出（commit 76f8af9）
 
 - `pkg/protocol/v2/types.go`：v2 wire types（无可写 Outcome/Assurance 字段，只有 ObligationResults）
 - `internal/kernel/` 目录骨架（identity/derive/contract/attestation/policy/bundle 六个包）
-- `cmd/proofverify/main.go` 骨架（不含逻辑，`go build ./...` 通过）
-- `testdata/adversarial/v2_invariants_test.go`：INV-01/06/07 占位 test
+- `cmd/proofverify/main.go` 骨架（`go build ./...` 通过）
+- `testdata/adversarial/v2_invariants_test.go`：INV-01 激活；INV-06/07/09 t.Skip pending M25
 - `internal/ir/types.go`、`internal/release/gate.go` 加 v1-only 注释与 TODO M25
-
-### 出口闸门
-
-- `go build ./...` 通过
-- `go test ./...` 通过（adversarial tests 以 `t.Skip` 标记为 pending）
-- `internal/kernel/` 无 domain/orchestrator/runner 导入（`go list -deps` 验证）
+- `go build/test/staticcheck/golangci-lint` 全部通过；kernel 无 domain 导入
 
 ---
 
-## Milestone 25 — 最小可信核（Canvas M1）
+## Milestone 25 — 最小可信核（Canvas M1）✅
 
 **背景：** 实现 `internal/kernel` 核心逻辑，使 `proofverify` 可从 v2 artifacts 推导状态。
 任何可写字段变化都必须被拒绝；release 不读取旧 STATUS 作为事实。
 
-### 目标产出
+### 完成产出（commit 4a66b4c）
 
-- `internal/kernel/identity/`：ClaimIdentity closure（sha256 of canonical inputs）
-- `internal/kernel/attestation/`：v2 attestation 验证（self-digest、身份绑定、签名、授权）
-- `internal/kernel/derive/`：v2 状态推导（OPEN/CANDIDATE/LOCALLY_VERIFIED/GLOBALLY_VERIFIED/REPRODUCIBLE/RELEASED/STALE/BLOCKED）与 staleness 传播
-- `internal/kernel/policy/`：v2 policy 解析（KeyAuth，角色-assurance-runtime 三元授权）
-- `cmd/proofverify`：可解析 bundle 并输出 `{"released": true/false, "blockers": [...]}`
-- adversarial tests INV-01/02/03/06/07/09 全部激活并通过
-
-### 出口闸门
-
-- 修改任意关键字段被 proofverify 拒绝（kernel 单元测试覆盖）
-- kernel 覆盖率 ≥95%，关键拒绝路径 100%
-- kernel 包无 subprocess/network/domain imports
+- `internal/kernel/identity/`：Compute() sha256 闭包，100% 覆盖率
+- `internal/kernel/attestation/`：Validate()（INV-02/03/04），97.1% 覆盖率
+- `internal/kernel/derive/`：DeriveClaimState() + PropagateStale()，96.2% 覆盖率
+- `internal/kernel/policy/`：IsKeyAuthorizedFor() + IsForbiddenRuntime()，100% 覆盖率
+- `cmd/proofverify bundle.verify`：读取 manifest、验证成员摘要、推导状态、输出 JSON
+- adversarial tests INV-01/06/07/09 全部激活通过（0 t.Skip）
 
 ---
 
 ## Milestone 26 — Protocol v2 与执行层（Canvas M2）
 
-- `pkg/protocol/v2/` 完整 obligation 协议
-- obligation exact-set validation（INV-06）
-- multi-evidence 显式模式 each/joint/matrix/none（INV-07）
-- OCI runner（`internal/runtime/oci/`）+ 只读 CAS materialization
-- pin bridge/checker/schema/lockfile/image 全部字段
-- native 结果强制 development-only 标记（INV-10）
+### 目标
+
+- `pkg/protocol/v2/ValidateOutput()`：obligation exact-set 验证（INV-06）
+- `internal/verify/`：当 checkerID.ProtocolVersion==2 时解析 CheckerOutputV2，不读 Outcome/Assurance
+- `internal/runner/`：native 结果写入 `runtime_class: "native-dev"`（INV-10 前置）
+- `internal/release/conditions.go`：C09 条件拒绝 native-dev runtime 进 release（INV-10）
+- `internal/runtime/oci/`：OCIRunner 接口骨架（实际 OCI 调度留 M26+）
+
+### 具体任务
+
+**T-M26-1：ValidateOutput（INV-06 执行层）**
+- `pkg/protocol/v2/validate.go`：`ValidateOutput(out CheckerOutputV2, expectedIDs []string) error`
+- 检查：protocol_version=2、claim_id 回显、obligation IDs 精确匹配（无多余、无缺失）、verdict 仅 pass/fail
+
+**T-M26-2：verify 层 v2 output 分叉**
+- `internal/verify/verify.go`：checkerID.ProtocolVersion==2 时走 v2 解析路径
+- 从 ObligationResults 派生 outcome，不读 Outcome/Assurance（INV-01 执行）
+
+**T-M26-3：native 标记 + C09 release 条件（INV-10）**
+- `internal/runner/runner.go`：NativeRunner 在返回结果附带 `RuntimeClass: "native-dev"`
+- `internal/release/conditions.go`：C09 — release 闭包中存在 native-dev 则阻断
+
+**T-M26-4：OCI runner 接口骨架**
+- `internal/runtime/oci/runner.go`：`OCIRunner` 实现 `runner.Runner`，当前返回 ErrNotImplemented
+
+### 出口闸门
+
+- v2 output 含错误 obligation ID 被 ValidateOutput 拒绝（unit test）
+- native runtime 触发 C09 阻断 release（unit test）
+- `go test ./... staticcheck golangci-lint` 全部通过
 
 ---
 
