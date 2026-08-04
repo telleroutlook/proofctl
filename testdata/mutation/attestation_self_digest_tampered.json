@@ -1,0 +1,14 @@
+{
+  "protocol_version": 2,
+  "claim_id": "thm-main",
+  "claim_identity_digest": "sha256:identity111",
+  "checker_identity_digest": "sha256:checker222",
+  "runtime_identity_digest": "sha256:runtime333",
+  "evidence_used": ["sha256:ev1"],
+  "obligation_results": [
+    {"id": "obl-a", "verdict": "pass"}
+  ],
+  "start_freshness": "2026-08-04T00:00:00Z",
+  "end_freshness": "2026-08-04T00:01:00Z",
+  "self_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+}

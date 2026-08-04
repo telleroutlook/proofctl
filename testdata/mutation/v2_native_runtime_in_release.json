@@ -1,0 +1,21 @@
+{
+  "claim_id": "thm-main",
+  "statement_digest": "sha256:stmt111",
+  "dependency_digests": [],
+  "evidence": [],
+  "checker": {
+    "id": "native-checker",
+    "protocol_version": 1,
+    "checker_digest": "sha256:chk111",
+    "schema_digest": "sha256:sch111",
+    "runtime": {
+      "kind": "native"
+    },
+    "network": "host"
+  },
+  "outcome": "accepted",
+  "assurance": "deterministic-cap",
+  "start_freshness": "2026-08-04",
+  "end_freshness": "2026-08-04",
+  "self_digest": "sha256:placeholder"
+}

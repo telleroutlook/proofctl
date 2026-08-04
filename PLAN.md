@@ -1321,12 +1321,80 @@ T47–T51 互相无依赖，可并行执行
 
 ---
 
+## Milestone 28 — Weil Contract 与 checker 闭环（Canvas M4）✅
+
+### 完成产出（commit c1f352e）
+
+- `domains/weil/contracts/`：D1–D18 全部 18 个 ContractV2 JSON，全部通过 `proofctl contract lint`
+- `domains/weil/policy-v2.json`：forbidden_runtimes + 19 required_claims（含 D11–D17）
+- `domains/weil/independence.json`：Path A/B 独立性约束
+- `internal/weil/defects.go`：补全 D11–D17，D18 更新 blockers
+
+---
+
 ## Milestone 29 — Mutation、Clean Replay 与正式发布（Canvas M5）
 
-- `proofctl mutate`：平台和 Weil mandatory mutation catalog（kill rate = 100%）
-- byte/semantic replay 分离；cleanroom pipeline（`proofctl replay @root --cleanroom`）
-- signed bundle；独立 proofverify smoke image
-- 两个干净环境完成 semantic replay
+### 目标
+
+- `proofctl mutate`：平台级 mandatory mutation catalog，verify kill rate = 100%
+- `proofctl bundle create`：从当前项目生成 v2 release bundle（manifest + attestations + policy + contracts）
+- `proofctl bundle verify`：对已生成 bundle 运行 proofverify（本地离线校验）
+- `testdata/mutation/` 扩展：新增 Canvas §13 要求的平台级 mutation fixtures
+- adversarial tests：覆盖所有新 mutation，确保 100% kill rate
+
+### 具体任务
+
+**T-M29-1：mutation fixtures 扩展（`testdata/mutation/`）**
+
+新建目录 `testdata/mutation/` 并添加以下 Canvas §13.1 平台级必测 mutation：
+
+| fixture 文件 | mutation 类型 | 预期拒绝原因 |
+|---|---|---|
+| `v2_wrong_protocol_version.json` | CheckerOutputV2 protocol_version=1 | PROTOCOL_VERSION |
+| `v2_claim_id_mismatch.json` | CheckerOutputV2 claim_id 不回显 | CLAIM_ID_MISMATCH |
+| `v2_missing_obligation.json` | CheckerOutputV2 缺少一个 obligation | OBLIGATION_MISSING |
+| `v2_extra_obligation.json` | CheckerOutputV2 有额外 obligation | OBLIGATION_EXTRA |
+| `v2_duplicate_obligation.json` | CheckerOutputV2 obligation ID 重复 | OBLIGATION_DUPLICATE |
+| `v2_invalid_verdict.json` | CheckerOutputV2 verdict="accepted" | VERDICT_INVALID |
+| `v2_native_runtime_in_release.json` | attestation runtime.kind="native" | C09 |
+| `attestation_self_digest_tampered.json` | AttestationV2 self_digest 被篡改 | SELF_DIGEST_MISMATCH |
+| `attestation_identity_stale.json` | AttestationV2 claim_identity_digest 不匹配 | IDENTITY_MISMATCH |
+
+**T-M29-2：`proofctl mutate` 子命令**
+
+`proofctl mutate [--catalog platform|weil] [--json]`
+
+- 加载 `testdata/mutation/` 中的 fixtures
+- 对每个 fixture 调用对应的验证函数（ValidateOutput / C09 / attestation.Validate）
+- 断言每个都被拒绝；统计 kill rate
+- 输出 `{"total": N, "killed": N, "survived": 0, "kill_rate": "100%"}`
+- kill rate < 100% 则 exit 1
+
+**T-M29-3：`proofctl bundle create`**
+
+`proofctl bundle create [--output <dir>] [--policy <file>]`
+
+- 从当前项目组装 bundle：
+  - 复制 `.proofctl/graph.json` → `bundle/graph.json`
+  - 复制 policy file → `bundle/policy.json`
+  - 复制 `.proofctl/attestations/*.json` → `bundle/attestations/`
+  - 复制 `domains/weil/contracts/*.json` → `bundle/contracts/`
+  - 计算所有成员 sha256 → 写入 `bundle/manifest.json`
+- 使用 `internal/kernel/bundle.Manifest` 结构
+
+**T-M29-4：`proofctl bundle verify`**
+
+`proofctl bundle verify <bundle-dir>`
+
+- 调用 `proofverify bundle.verify <bundle-dir>` 的逻辑（复用 `cmd/proofverify/main.go` 中的 `verifyBundle`）
+- 直接在 proofctl 进程内调用，不需要 subprocess
+
+### 出口闸门
+
+- `testdata/mutation/` 所有 fixtures 被对应验证函数拒绝（unit tests）
+- `proofctl mutate` kill rate = 100%
+- `proofctl bundle create` + `proofctl bundle verify` 端到端通过（integration test）
+- `go test ./...` staticcheck/golangci-lint 通过
 
 ---
 

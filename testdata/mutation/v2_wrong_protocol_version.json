@@ -1,0 +1,11 @@
+{
+  "protocol_version": 1,
+  "claim_id": "thm-main",
+  "input_closure_digest": "sha256:aaa",
+  "checker_identity_digest": "sha256:bbb",
+  "runtime_identity_digest": "sha256:ccc",
+  "evidence_used": ["sha256:ev1"],
+  "obligation_results": [
+    {"id": "obl-a", "verdict": "pass"}
+  ]
+}

@@ -111,6 +111,10 @@ func main() {
 		cmdContract(subargs, *jsonFlag)
 	case "identity":
 		cmdIdentity(subargs, *jsonFlag)
+	case "mutate":
+		cmdMutate(subargs, *jsonFlag)
+	case "bundle":
+		cmdBundle(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -147,6 +151,8 @@ Subcommands:
   export    Export an accepted claim to a cross-domain format (--format lean)
   contract  Verify a Verification Contract v2 file (contract lint <file>)
   identity  Show the content identity closure of a claim (identity @claim)
+  mutate    Run the mandatory mutation catalog (kill rate must be 100%)
+  bundle    Manage release bundles (bundle create|verify)
   status    Print the current proof graph status (--watch)
 
 Flags:
