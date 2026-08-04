@@ -28,6 +28,7 @@ func cmdPinChecker(args []string, useJSON bool) {
 	cmdFlag := fs.String("cmd", "", `checker command, e.g. "python3 adapters/cap/bridge.py"`)
 	idFlag := fs.String("id", "", "checker ID in graph.json to update (default: first checker)")
 	lockFlag := fs.String("lock", "", "dependency lockfile to pin (e.g. requirements.txt, go.sum, uv.lock)")
+	schemaFlag := fs.String("schema", "", "JSON Schema file to pin (computes schema_digest and records schema_path)")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
@@ -63,6 +64,16 @@ func cmdPinChecker(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, "pin checker: empty command")
 	}
 
+	// Reject absolute paths in cmd[1:] that are not ${VAR} placeholders.
+	// Absolute paths break portability across machines; use relative paths or ${ENV_VAR}.
+	for i, part := range cmdParts[1:] {
+		if !strings.HasPrefix(part, "${") && !strings.HasPrefix(part, "-") && filepath.IsAbs(part) {
+			die(useJSON, errors.CodeInvalidInput, fmt.Sprintf(
+				"pin checker: cmd[%d] %q is an absolute path — use a relative path or ${ENV_VAR} placeholder for portability",
+				i+1, part))
+		}
+	}
+
 	// Hash the last element of cmd (the script to be pinned).
 	scriptPath := cmdParts[len(cmdParts)-1]
 	digest, err := hashFile(scriptPath)
@@ -85,6 +96,20 @@ func cmdPinChecker(args []string, useJSON bool) {
 		}
 	}
 
+	// Hash schema file if provided.
+	var schemaDigest, schemaRelPath string
+	if *schemaFlag != "" {
+		schemaDigest, err = hashFile(*schemaFlag)
+		if err != nil {
+			die(useJSON, errors.CodeInternalError, "pin checker: hash schema: "+err.Error())
+		}
+		if rel, relErr := filepath.Rel(root, *schemaFlag); relErr == nil && !strings.HasPrefix(rel, "..") {
+			schemaRelPath = rel
+		} else {
+			schemaRelPath = *schemaFlag
+		}
+	}
+
 	// Update matching checker in the ProofGraph.
 	updated := false
 	for i, ch := range pg.Checkers {
@@ -92,9 +117,13 @@ func cmdPinChecker(args []string, useJSON bool) {
 			continue
 		}
 		pg.Checkers[i].CheckerDigest = digest
+		if schemaDigest != "" {
+			pg.Checkers[i].SchemaDigest = schemaDigest
+		}
 		pg.Checkers[i].Runtime = ir.Runtime{
 			Kind:                     "native",
 			Cmd:                      cmdParts,
+			SchemaPath:               schemaRelPath,
 			DependencyManifestDigest: lockDigest,
 			DependencyManifestPath:   lockRelPath,
 		}
@@ -132,6 +161,12 @@ func cmdPinChecker(args []string, useJSON bool) {
 		fmt.Fprintln(os.Stderr, "    uv.lock            proofctl pin checker --cmd ... --lock uv.lock")
 		fmt.Fprintln(os.Stderr, "    go.sum             proofctl pin checker --cmd ... --lock go.sum")
 	}
+	// Warn if no schema was pinned.
+	if schemaDigest == "" && !useJSON {
+		fmt.Fprintln(os.Stderr, "warn: schema_digest not pinned — schema tampering will not be detected at runtime")
+		fmt.Fprintln(os.Stderr, "  To pin, rerun with --schema pointing to the checker's JSON Schema file:")
+		fmt.Fprintln(os.Stderr, "    proofctl pin checker --cmd ... --schema schemas/checker.schema.json")
+	}
 
 	if useJSON {
 		out := map[string]string{
@@ -144,7 +179,13 @@ func cmdPinChecker(args []string, useJSON bool) {
 			out["dependency_manifest_digest"] = lockDigest
 			out["dependency_manifest_path"] = lockRelPath
 		} else {
-			out["warn"] = "checker dependencies not pinned — rerun with --lock <manifest>; accepted formats: requirements.txt, uv.lock, go.sum"
+			out["warn_lock"] = "checker dependencies not pinned — rerun with --lock <manifest>; accepted formats: requirements.txt, uv.lock, go.sum"
+		}
+		if schemaDigest != "" {
+			out["schema_digest"] = schemaDigest
+			out["schema_path"] = schemaRelPath
+		} else {
+			out["warn_schema"] = "schema_digest not pinned — rerun with --schema <schema-file>"
 		}
 		enc := json.NewEncoder(os.Stdout)
 		_ = enc.Encode(out)
@@ -154,6 +195,9 @@ func cmdPinChecker(args []string, useJSON bool) {
 		fmt.Printf("  cmd:    %s\n", *cmdFlag)
 		if lockDigest != "" {
 			fmt.Printf("  lock:   %s (%s)\n", lockRelPath, lockDigest)
+		}
+		if schemaDigest != "" {
+			fmt.Printf("  schema: %s (%s)\n", schemaRelPath, schemaDigest)
 		}
 		fmt.Printf("  written to %s\n", srcPath)
 	}

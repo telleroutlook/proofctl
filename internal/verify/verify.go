@@ -4,8 +4,11 @@ package verify
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +88,14 @@ func (p *Pipeline) Run(
 			return nil, proofErr.Newf(proofErr.CodeMissingEvidence,
 				"claim %q: evidence %s: %v", claimID, desc.Digest, err)
 		}
+	}
+
+	// 2b. Re-compute SHA-256 of on-disk evidence files and compare against stored
+	// digests. This detects stale evidence entries where graph.json references a
+	// digest that no longer matches the file at path_hint.
+	if err := verifyEvidenceDigestsOnDisk(evidence); err != nil {
+		return nil, proofErr.Newf(proofErr.CodeMissingEvidence,
+			"claim %q: %v", claimID, err)
 	}
 
 	// 3. Compute cache key.
@@ -233,9 +244,17 @@ func (p *Pipeline) Run(
 		CacheKey: cacheKey,
 	}
 	if checkerOut != nil {
-		att.Resources.WallMillis = checkerOut.Resources.WallMillis
-		att.Resources.CPUMillis = checkerOut.Resources.CPUMillis
-		att.Resources.MemBytes = checkerOut.Resources.MemBytes
+		// Only use checker-reported wall time if it is non-zero; otherwise keep the
+		// locally-measured wallMillis so the field is never left as 0.
+		if checkerOut.Resources.WallMillis > 0 {
+			att.Resources.WallMillis = checkerOut.Resources.WallMillis
+		}
+		if checkerOut.Resources.CPUMillis > 0 {
+			att.Resources.CPUMillis = checkerOut.Resources.CPUMillis
+		}
+		if checkerOut.Resources.MemBytes > 0 {
+			att.Resources.MemBytes = checkerOut.Resources.MemBytes
+		}
 		if len(checkerOut.Metadata) > 0 {
 			att.Metadata = checkerOut.Metadata
 		}
@@ -495,4 +514,35 @@ func isRunError(err error, target **runner.RunError) bool {
 // isSigInvalidError reports whether err originated from a signature verification failure.
 func isSigInvalidError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "signature-invalid")
+}
+
+// verifyEvidenceDigestsOnDisk recomputes the SHA-256 of each evidence file that has
+// a path_hint and compares it against the stored digest. Files that are absent on
+// disk are skipped (CAS verification already covers content-addressable storage).
+// A mismatch means the file was modified after graph.json was last compiled.
+func verifyEvidenceDigestsOnDisk(evidence []ir.EvidenceDescriptor) error {
+	for _, desc := range evidence {
+		if desc.PathHint == "" {
+			continue
+		}
+		f, err := os.Open(desc.PathHint)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // not on disk; CAS path handles it
+			}
+			return fmt.Errorf("evidence %s: open path_hint %q: %w", desc.Digest, desc.PathHint, err)
+		}
+		h := sha256.New()
+		if _, err := io.Copy(h, f); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("evidence %s: hash path_hint %q: %w", desc.Digest, desc.PathHint, err)
+		}
+		_ = f.Close()
+		got := "sha256:" + hex.EncodeToString(h.Sum(nil))
+		if got != desc.Digest {
+			return fmt.Errorf("evidence digest mismatch for %q: graph.json stores %s but on-disk file %s has %s — re-run 'proofctl compile --fix-digests' or update graph.json evidence",
+				desc.PathHint, desc.Digest, desc.PathHint, got)
+		}
+	}
+	return nil
 }

@@ -153,6 +153,14 @@ func (r *NativeRunner) Run(ctx context.Context, checkerID ir.CheckerIdentity, in
 		}
 	}
 
+	if err := verifySchemaDigest(r.ProjectRoot, checkerID); err != nil {
+		return nil, &RunError{
+			Code:    ExitUnavailable,
+			Stderr:  err.Error(),
+			Wrapped: err,
+		}
+	}
+
 	//nolint:gosec // argv is resolved from pinned CheckerIdentity, not user input.
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdin = input
@@ -299,6 +307,39 @@ func verifyBinaryDigest(path, expectedDigest string) error {
 	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
 	if got != expectedDigest {
 		return fmt.Errorf("runner: checker binary digest mismatch: want %s got %s", expectedDigest, got)
+	}
+	return nil
+}
+
+// verifySchemaDigest checks the schema file digest recorded in checkerID.SchemaDigest
+// against the file at checkerID.Runtime.SchemaPath. A zero or empty SchemaDigest is
+// treated as a development placeholder and skipped. SchemaPath is resolved relative to
+// projectRoot when it is not absolute.
+func verifySchemaDigest(projectRoot string, checkerID ir.CheckerIdentity) error {
+	expected := checkerID.SchemaDigest
+	if expected == "" || expected == "sha256:"+strings.Repeat("0", 64) {
+		return nil
+	}
+	schemaPath := checkerID.Runtime.SchemaPath
+	if schemaPath == "" {
+		return nil // no schema path recorded — skip verification
+	}
+	if projectRoot != "" && !filepath.IsAbs(schemaPath) {
+		schemaPath = filepath.Join(projectRoot, schemaPath)
+	}
+	f, err := os.Open(schemaPath)
+	if err != nil {
+		return fmt.Errorf("runner: open schema file for digest check %q: %w", schemaPath, err)
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("runner: hash schema file %q: %w", schemaPath, err)
+	}
+	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	if got != expected {
+		return fmt.Errorf("runner: schema digest mismatch for %q: want %s got %s — re-run 'proofctl pin checker --schema %s' to update",
+			schemaPath, expected, got, schemaPath)
 	}
 	return nil
 }

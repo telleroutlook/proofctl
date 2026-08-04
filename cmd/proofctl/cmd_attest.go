@@ -106,6 +106,14 @@ func cmdAttest(args []string, useJSON bool) {
 
 	metadata := parseMetaFlags(metaFlags, *noteFlag, useJSON)
 
+	// independent-review must identify the reviewer for auditability.
+	if assurance == ir.AssuranceIndependentReview {
+		if metadata == nil || metadata["reviewer"] == "" {
+			die(useJSON, errors.CodeInvalidInput,
+				"attest: --assurance independent-review requires --metadata reviewer=<name-or-orcid>")
+		}
+	}
+
 	claimID := *claimFlag
 	if g.Claim(claimID) == nil {
 		die(useJSON, errors.CodeMissingDependency, fmt.Sprintf("attest: unknown claim %q", claimID))
@@ -198,6 +206,14 @@ func cmdAttestBatch(manifestPath, attestDir string, g *dag.DAG, signingKey *sign
 				Error: "independent-review requires a signing key — set --key or PROOFCTL_SIGNING_KEY"})
 			failed++
 			continue
+		}
+		if assurance == ir.AssuranceIndependentReview {
+			if e.Metadata == nil || e.Metadata["reviewer"] == "" {
+				results = append(results, batchResult{Claim: e.Claim,
+					Error: "independent-review requires metadata.reviewer field"})
+				failed++
+				continue
+			}
 		}
 
 		metadata := e.Metadata

@@ -1041,3 +1041,102 @@ vs `"self_consistency"`（proofctl check 对已导入 CAS 的 evidence 运行 ch
 
 > 评估 Suggestion P3（leaf_midpoint_check schema 要求）属于 checker 协议扩展，
 > 不在 proofctl 策略层直接支持，留作 checker 实现规范，不在本 Milestone 实现。
+
+---
+
+## Milestone 23 — 实测 Bug 修复与完整性加固（2026-08-04）
+
+**背景：** 外部实测会话发现 5 个可复现的 proofctl 框架缺陷，以及 6 项结构性 prevention 建议。
+经代码核查，Prevention 1–3 已通过 C06/C07/C08 实现；本 Milestone 修复剩余 5 个 bug 和
+3 项尚未实现的 prevention（P4/P5/P6）。
+
+### 核实结果
+
+| # | 缺陷 | 代码核查结论 | 状态 |
+|---|---|---|---|
+| Bug 1 | schema_digest 全零，未计算 | `pin checker` 只更新 `checker_digest`，`schema_digest` 从未自动填充 | **真实** |
+| Bug 2 | runtime.cmd 包含绝对路径，无法移植 | `pin checker` 接受任意 `--cmd`，`compile` 不拒绝绝对路径 cmd | **真实** |
+| Bug 3 | evidence digest 过期不检测 | `check` 路径只做 CAS 存在性验证，不重新计算磁盘文件哈希 | **真实** |
+| Bug 4 | attestation resources 字段全零 | checker 输出零值时会覆盖已计算的 `wallMillis`；`replay` 路径完全不记录 resources | **真实** |
+| Bug 5 | independent-review 无审查者身份 | `attest` 不强制 reviewer 字段，meta 完全自由文本 | **真实（policy 层）** |
+| P1 | allowed_remainder_types 策略白名单 | C06 `allowed_metadata_values` 已完整实现 | ✅ 已完成 |
+| P2 | required_certificate_fields 策略 | C07 `conditional_metadata_keys` 已完整实现 | ✅ 已完成 |
+| P3 | kappa gate 命名子检查 | C08 `required_replay_mode` 部分覆盖；gate 名称策略未做 | 留作 checker 协议 |
+| P4 | checker 完整性循环（schema_digest 自动计算） | `pin checker` 无 `--schema` 支持；`run` 不验证 schema_digest | **待实现** |
+| P5 | 拒绝非仓库相对路径 | `pin checker` 和 `compile` 均不检查绝对路径 | **待实现** |
+| P6 | evidence digest 重新计算（attest 前） | `check` 不对磁盘文件做 digest 重算 | **待实现** |
+
+### T47：Bug 1 + P4 — `pin checker --schema` 自动计算 schema_digest
+
+**目标：** `proofctl pin checker` 支持 `--schema <file>` flag，自动计算并写入 `schema_digest`。
+`verifyBinaryDigest` 同样验证 `schema_digest`（当非零时）。
+
+- `cmd/proofctl/cmd_pin.go`：新增 `--schema <schemafile>` flag
+  - 计算 `sha256(schemafile)` → 写入 `pg.Checkers[i].SchemaDigest`
+  - 若未传 `--schema`，打印 warn（与 `--lock` 一致）
+- `internal/runner/runner.go`：`verifyBinaryDigest` 重命名为 `verifyDigest`；
+  新增 `verifySchemaDigest(checkerID)`，在 `Run()` 中调用（全零或空时跳过，非零则验证）
+  - schema 文件路径从 `checkerID.Runtime.SchemaPath` 或项目根的 `schemas/` 中自动查找
+
+**实现要点：**
+- `ir.Runtime` 新增 `SchemaPath string` 字段（`omitempty`）
+- `verifySchemaDigest` 失败 → `RunError{Code: ExitUnavailable}`，阻断 attestation 写入
+- 向后兼容：`schema_digest` 为全零或空 → 跳过验证（现有 attestation 不受影响）
+
+### T48：Bug 2 + P5 — `pin checker` 拒绝绝对路径 cmd
+
+**目标：** `proofctl pin checker` 检查 `--cmd` 中的路径元素：若包含非 `${VAR}` 格式的绝对路径，
+报错并拒绝写入。
+
+- `cmd/proofctl/cmd_pin.go`：在写回 graph.json 前，对 `cmd[1:]` 每个非 flag 元素：
+  - 若是绝对路径 → `die(...)` with 明确建议："use a relative path or ${ENV_VAR} placeholder"
+  - 若已是 `${VAR}` 形式 → 允许（运行时展开）
+  - 若是相对路径 → 允许
+- 同样在 `compile` 时对 graph.json 中已有的 checker cmd 做静态检查（warn，不 fail）
+
+### T49：Bug 3 + P6 — `check` 时重新计算 evidence digest
+
+**目标：** `proofctl check` 和 `proofctl verify` 在运行 checker 前，对每个有 `path_hint` 的
+evidence descriptor 重新计算磁盘文件的 SHA-256，与 graph.json 中存储的 digest 比对。
+不一致则阻断，打印明确错误而非静默通过。
+
+- `internal/verify/verify.go`：步骤 2（`CAS.Verify`）之后、步骤 5（freshness snapshot）之前，
+  新增 `verifyEvidenceDigestsOnDisk(evidence []ir.EvidenceDescriptor)` 调用：
+  - 对每个 `desc.PathHint != ""` 的 evidence，计算磁盘文件 sha256
+  - 若不匹配 → `proofErr.Newf(CodeMissingEvidence, "claim %q: evidence %s: on-disk file %s has digest %s, expected %s", ...)`
+  - 若文件不存在 → 跳过（CAS 路径已覆盖）
+- `internal/cas/cas.go`：`Verify()` 已经检查 size，维持不变；新增检查是补充，非替代
+
+### T50：Bug 4 — `replay` 和 `check` 路径正确记录 resources
+
+**目标：** resources 字段（wall_millis）反映真实运行时间，不被 checker 输出的零值覆盖。
+
+**`check` 路径（`internal/verify/verify.go`）：**
+- 当前行为：`att.Resources.WallMillis = checkerOut.Resources.WallMillis`，checker 未输出时为 0
+- 修复：只当 `checkerOut.Resources.WallMillis > 0` 时才用 checker 值，否则保留 `wallMillis`（本地计时）
+
+**`replay` 路径（`cmd/proofctl/cmd_replay.go`）：**
+- 当前行为：attestation 中无 resources 字段
+- 修复：在步骤 1–3 完成后，记录 wall_millis（generator + checker 总耗时），写入 attestation
+
+### T51：Bug 5 — `attest --assurance independent-review` 强制 reviewer 字段
+
+**目标：** `independent-review` assurance 必须在 metadata 中包含 `reviewer` 字段（非空字符串）。
+策略可通过 `required_metadata_keys: ["reviewer"]` 强制，框架在 `attest` 时做前置检查。
+
+- `cmd/proofctl/cmd_attest.go`：`buildAndWriteAttestation` 中，当 `assurance == ir.AssuranceIndependentReview`：
+  - 若 `metadata["reviewer"]` 为空 → `die(...)` with 提示："--metadata reviewer=<name-or-orcid>"
+- 更新 `examples/minimal/README.md` 和文档：说明 independent-review 需要 reviewer 字段
+
+---
+
+### 任务顺序（M23）
+
+```
+T47 (schema_digest pin + verify)    ──→ 独立，修改 ir/Runtime + cmd_pin + runner
+T48 (绝对路径拒绝)                  ──→ 独立，只改 cmd_pin；compile warn 附带
+T49 (evidence digest 重算)          ──→ 独立，只改 internal/verify
+T50 (resources 时间记录修复)        ──→ 独立，改 verify.go + cmd_replay.go
+T51 (reviewer 字段强制)             ──→ 独立，只改 cmd_attest.go
+T47–T51 互相无依赖，可并行执行
+```

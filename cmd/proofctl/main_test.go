@@ -273,7 +273,8 @@ func TestPinChecker_NoLock(t *testing.T) {
 	}
 	writeMinimalGraph(t, bin, dir, script)
 
-	stdout, stderr, _ := run(t, bin, dir, "pin", "checker", "--cmd", "sh "+script)
+	// Use a relative path so the absolute-path guard does not trigger.
+	stdout, stderr, _ := run(t, bin, dir, "pin", "checker", "--cmd", "sh check.sh")
 	combined := stdout + stderr
 	if !strings.Contains(combined, "warn") && !strings.Contains(combined, "not pinned") {
 		t.Errorf("expected dependency-not-pinned warning, got stdout=%q stderr=%q", stdout, stderr)
@@ -296,15 +297,17 @@ func TestPinChecker_WithLock(t *testing.T) {
 	}
 	writeMinimalGraph(t, bin, dir, script)
 
+	// Use relative paths so the absolute-path guard does not trigger.
 	_, stderr, code := run(t, bin, dir, "pin", "checker",
-		"--cmd", "sh "+script,
-		"--lock", lockfile,
+		"--cmd", "sh check.sh",
+		"--lock", "requirements.txt",
 	)
 	if code != 0 {
 		t.Fatalf("pin checker --lock: expected exit 0, got %d, stderr=%q", code, stderr)
 	}
-	if strings.Contains(stderr, "warn") {
-		t.Errorf("unexpected warning when --lock provided: %q", stderr)
+	// The lock warning must not appear; the schema warning is expected (no --schema given).
+	if strings.Contains(stderr, "dependencies not pinned") {
+		t.Errorf("unexpected lock warning when --lock provided: %q", stderr)
 	}
 
 	// The graph source should now contain dependency_manifest_digest.

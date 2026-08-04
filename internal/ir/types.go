@@ -82,6 +82,10 @@ type Runtime struct {
 	Digest                   string   `json:"digest,omitempty"`
 	DependencyManifestDigest string   `json:"dependency_manifest_digest,omitempty"` // sha256 of lockfile (requirements.txt, go.sum, etc.)
 	DependencyManifestPath   string   `json:"dependency_manifest_path,omitempty"`   // relative path to lockfile from project root
+	// SchemaPath is the relative path (from project root) to the JSON Schema file
+	// whose digest is recorded in CheckerIdentity.SchemaDigest. Used by the runner
+	// to verify schema integrity before each checker invocation.
+	SchemaPath string `json:"schema_path,omitempty"`
 }
 
 // Status values for a claim.

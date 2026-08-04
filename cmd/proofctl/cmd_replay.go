@@ -156,6 +156,7 @@ func cmdReplay(args []string, useJSON bool) {
 
 	results := make([]replayItemResult, len(pairs))
 	allPass := true
+	replayStart := time.Now()
 
 	for i, p := range pairs {
 		// --reuse-generated: use pre-generated cert from directory instead of running generator.
@@ -309,6 +310,7 @@ func cmdReplay(args []string, useJSON bool) {
 		if *semanticFlag {
 			assurance = ir.AssuranceReproducibleComputation
 		}
+		wallMillis := time.Since(replayStart).Milliseconds()
 		att := ir.Attestation{
 			ClaimID:        *claimIDFlag,
 			Outcome:        string(ir.StatusAccepted),
@@ -316,6 +318,9 @@ func cmdReplay(args []string, useJSON bool) {
 			ReplayMode:     "from_scratch",
 			StartFreshness: replayDate,
 			EndFreshness:   replayDate,
+			Resources: ir.ResourceStats{
+				WallMillis: wallMillis,
+			},
 			Metadata: map[string]string{
 				"cold_replay_date": replayDate,
 				"evidence_count":   fmt.Sprintf("%d", len(pairs)),
