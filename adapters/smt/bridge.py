@@ -1,150 +1,218 @@
 #!/usr/bin/env python3
 """
-SMT checker bridge for proofctl.
+SMT checker bridge — proofctl wire protocol v2 adapter.
+
+Reads CheckerInputV2 JSON from stdin; writes CheckerOutputV2 JSON to stdout.
 
 Supports two proof formats:
-  --format alethe   Alethe proof format (cvc5 / veriT output)
-  --format drat     DRAT/LRAT-adjacent SAT refutation proof
+  alethe   Alethe proof format (cvc5 / veriT output)
+  drat     DRAT/LRAT-adjacent SAT refutation proof
 
-Usage:
-    bridge.py [--format alethe|drat] <cert-file>
+The cert-file (first evidence item with a valid local_path) is a JSON object:
+    smt_file      - path to the SMT-LIB2 problem file (.smt2)
+    proof_file    - path to the proof certificate (required unless formula_only)
+    format        - "alethe" or "drat" (default: "alethe")
+    formula_only  - true to check formula well-formedness only (no proof)
 
-The cert-file is a JSON object with fields:
-    smt_file    - path to the SMT-LIB2 problem file (.smt2)
-    proof_file  - path to the proof certificate
-    format      - "alethe" or "drat" (overrides --format flag)
+Obligations produced:
+    formula_only=true   smt.formula-well-formed
+    otherwise           smt.proof-checker-accepts, smt.unsat-witness-valid
 
 Exit codes:
-    0  proof verified
-    1  proof rejected or verification failed
-    2  checker unavailable (required tool not in PATH)
-    3  protocol error (bad cert-file format)
+    0  obligation results written (pass or fail)
+    2  checker tool not available (CheckerErrorV2)
+    3  protocol error / bad input (CheckerErrorV2)
+
+BRIDGE_CHECKER env var overrides the default tool selection.
 """
-import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
-# Supported formats and their verifier commands.
+PROTOCOL_VERSION = 2
+
 _VERIFIERS = {
-    "alethe": ["verit-checker"],
-    "drat":   ["drat-trim"],
+    "alethe": "verit-checker",
+    "drat":   "drat-trim",
 }
+
+_FORMULA_OBLIGATIONS = ["smt.formula-well-formed"]
+_PROOF_OBLIGATIONS   = ["smt.proof-checker-accepts", "smt.unsat-witness-valid"]
+
+
+def _checker_identity() -> str:
+    """Return sha256 digest of this script file."""
+    try:
+        data = Path(__file__).read_bytes()
+        return "sha256:" + hashlib.sha256(data).hexdigest()
+    except Exception:
+        return ""
+
+
+def _input_closure_digest(raw: bytes) -> str:
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
 def _checker_version(tool: str) -> str:
-    """Return the version of a tool, or 'unknown'."""
     try:
-        result = subprocess.run(
+        r = subprocess.run(
             [tool, "--version"], capture_output=True, text=True, timeout=10
         )
-        first_line = (result.stdout + result.stderr).splitlines()
-        return first_line[0].strip() if first_line else "unknown"
+        lines = (r.stdout + r.stderr).splitlines()
+        return lines[0].strip() if lines else "unknown"
     except Exception:
         return "unknown"
 
 
-def _output(outcome: str, claim_id: str, metadata: dict) -> None:
+def _error_out(claim_id: str, code: str, message: str) -> None:
+    """Write CheckerErrorV2 to stdout."""
     print(json.dumps({
-        "protocol_version": 1,
+        "protocol_version": PROTOCOL_VERSION,
         "claim_id": claim_id,
-        "outcome": outcome,
-        "assurance": "formal-kernel",
-        "metadata": metadata,
+        "code": code,
+        "message": message,
+    }))
+
+
+def _find_cert(evidence: list) -> "Path | None":
+    """Return the path of the first evidence item with a valid local_path."""
+    for item in evidence:
+        lp = item.get("local_path", "")
+        if lp and Path(lp).exists():
+            return Path(lp)
+    return None
+
+
+def _write_output(
+    claim_id: str,
+    closure_digest: str,
+    obl_results: list,
+    toolchain: dict,
+    evidence: list,
+) -> None:
+    evidence_used = [
+        item["digest"]
+        for item in evidence
+        if item.get("digest") and item.get("local_path")
+        and Path(item["local_path"]).exists()
+    ]
+    print(json.dumps({
+        "protocol_version":        PROTOCOL_VERSION,
+        "claim_id":                claim_id,
+        "input_closure_digest":    closure_digest,
+        "checker_identity_digest": _checker_identity(),
+        "runtime_identity_digest": "",
+        "evidence_used":           evidence_used,
+        "obligation_results":      obl_results,
+        "toolchain":               toolchain,
     }))
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--format", default="alethe", choices=["alethe", "drat"])
-    parser.add_argument("cert_file", nargs="?", default="")
-    args, _ = parser.parse_known_args()
+    raw = sys.stdin.buffer.read()
+    try:
+        inp = json.loads(raw)
+    except json.JSONDecodeError as e:
+        _error_out("", "MALFORMED_INPUT", f"cannot parse CheckerInputV2 JSON: {e}")
+        return 3
 
-    cert_path = args.cert_file
-    if not cert_path and len(sys.argv) > 1:
-        # Fallback: last positional arg.
-        cert_path = sys.argv[-1]
+    claim_id       = inp.get("claim_id", "")
+    evidence       = inp.get("evidence", [])
+    obligation_ids = inp.get("obligation_ids", [])
+    closure_digest = _input_closure_digest(raw)
 
-    if not cert_path:
-        _output("error", "", {"error": "usage: bridge.py [--format alethe|drat] <cert-file>"})
+    # Locate cert file from evidence.
+    cert_path = _find_cert(evidence)
+    if cert_path is None:
+        _error_out(claim_id, "EVIDENCE_NOT_FOUND",
+                   "no evidence item has a valid local_path")
         return 3
 
     try:
         with open(cert_path, encoding="utf-8") as f:
             cert = json.load(f)
-    except Exception as exc:
-        _output("error", "", {"error": f"cannot read cert-file: {exc}"})
+    except Exception as e:
+        _error_out(claim_id, "CERT_READ_ERROR",
+                   f"cannot read cert file {cert_path}: {e}")
         return 3
 
-    smt_file = cert.get("smt_file", "")
-    proof_file = cert.get("proof_file", "")
-    fmt = cert.get("format", args.format)
-    claim_id = cert.get("claim_id", "")
+    smt_file     = cert.get("smt_file", "")
+    proof_file   = cert.get("proof_file", "")
+    fmt          = cert.get("format", "alethe")
+    formula_only = bool(cert.get("formula_only", False))
 
-    if not smt_file or not proof_file:
-        _output("error", claim_id, {"error": "cert-file must contain 'smt_file' and 'proof_file'"})
+    # Validate required fields.
+    if not smt_file:
+        _error_out(claim_id, "MISSING_SMT_FILE",
+                   "cert must contain 'smt_file'")
         return 3
 
-    for path, name in [(smt_file, "smt_file"), (proof_file, "proof_file")]:
-        if not os.path.isfile(path):
-            _output("error", claim_id, {"error": f"{name} not found: {path}"})
+    if not os.path.isfile(smt_file):
+        _error_out(claim_id, "SMT_FILE_NOT_FOUND",
+                   f"smt_file not found: {smt_file}")
+        return 3
+
+    if not formula_only:
+        if not proof_file:
+            _error_out(claim_id, "MISSING_PROOF_FILE",
+                       "cert must contain 'proof_file' when formula_only is not set")
+            return 3
+        if not os.path.isfile(proof_file):
+            _error_out(claim_id, "PROOF_FILE_NOT_FOUND",
+                       f"proof_file not found: {proof_file}")
             return 3
 
-    if fmt not in _VERIFIERS:
-        _output("error", claim_id, {"error": f"unsupported format: {fmt}"})
+    # Resolve verifier tool: BRIDGE_CHECKER overrides format-based default.
+    tool = os.environ.get("BRIDGE_CHECKER", "") or _VERIFIERS.get(fmt, "")
+    if not tool:
+        _error_out(claim_id, "UNSUPPORTED_FORMAT",
+                   f"no verifier known for format '{fmt}' and BRIDGE_CHECKER is not set")
         return 3
-
-    tool = _VERIFIERS[fmt][0]
 
     # Check tool availability.
     try:
         subprocess.run([tool, "--version"], capture_output=True, timeout=10, check=False)
     except FileNotFoundError:
-        _output("error", claim_id, {"error": f"{tool} not found in PATH (required for {fmt} format)"})
+        _error_out(claim_id, "CHECKER_NOT_FOUND",
+                   f"verifier '{tool}' not found in PATH (required for {fmt} format)")
         return 2
 
-    version = _checker_version(tool)
+    version  = _checker_version(tool)
+    toolchain = {"smt_checker_version": version, "format": fmt}
 
-    # Run verifier.
-    if fmt == "alethe":
-        cmd = [tool, smt_file, proof_file]
-    else:  # drat
-        cmd = [tool, smt_file, proof_file]
+    # Build verifier command.
+    # formula_only: verify the SMT2 file alone (well-formedness check).
+    # full proof:   verify smt_file against proof_file.
+    cmd = [tool, smt_file] if formula_only else [tool, smt_file, proof_file]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
-        _output("rejected", claim_id, {
-            "format": fmt,
-            "smt_file": smt_file,
-            "proof_file": proof_file,
-            "error": f"{tool} timed out",
-        })
-        return 1
-    except Exception as exc:
-        _output("error", claim_id, {"error": f"{tool} execution error: {exc}"})
+        obl_results = [
+            {"id": oid, "verdict": "fail", "method": f"{fmt}-timeout"}
+            for oid in obligation_ids
+        ]
+        _write_output(claim_id, closure_digest, obl_results, toolchain, evidence)
+        return 0
+    except Exception as e:
+        _error_out(claim_id, "CHECKER_EXEC_ERROR",
+                   f"verifier '{tool}' execution error: {e}")
         return 2
 
-    # Interpret exit code: 0 = verified, non-zero = rejected.
-    if result.returncode == 0:
-        _output("accepted", claim_id, {
-            f"{fmt}_checker_version": version,
-            "format": fmt,
-            "smt_file": smt_file,
-            "proof_file": proof_file,
-        })
-        return 0
-    else:
-        error_lines = (result.stdout + result.stderr).splitlines()
-        _output("rejected", claim_id, {
-            f"{fmt}_checker_version": version,
-            "format": fmt,
-            "smt_file": smt_file,
-            "proof_file": proof_file,
-            "error": "; ".join(error_lines[:3]),
-        })
-        return 1
+    # Map verifier exit code to obligation verdicts.
+    # exit 0 = all obligations pass; non-zero = all obligations fail.
+    method  = f"{fmt}-verify"
+    verdict = "pass" if proc.returncode == 0 else "fail"
+    obl_results = [
+        {"id": oid, "verdict": verdict, "method": method}
+        for oid in obligation_ids
+    ]
+
+    _write_output(claim_id, closure_digest, obl_results, toolchain, evidence)
+    return 0
 
 
 if __name__ == "__main__":

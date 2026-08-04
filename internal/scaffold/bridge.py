@@ -1,5 +1,5 @@
 """
-CAP checker bridge — proofctl wire protocol v1 adapter.
+CAP checker bridge — proofctl wire protocol v2 adapter.
 
 Translates between proofctl's CheckerInput/CheckerOutput JSON protocol
 (stdin/stdout) and a domain checker that takes a certificate JSON file path
@@ -10,17 +10,25 @@ Usage (in a ProofGraph checker_policy or CheckerIdentity runtime):
 
 The bridge reads CheckerInput JSON from stdin, locates the certificate file
 from the evidence list, invokes the domain checker subprocess, and writes
-CheckerOutput JSON to stdout.
+CheckerOutput JSON (protocol v2) to stdout.
 
 Domain checker contract:
     exit 0  — CERTIFIED
     exit 1  — UNCERTIFIED (proof failed)
     exit 2  — malformed certificate (schema / resource violation)
+    exit 3  — protocol error (e.g. missing BRIDGE_CHECKER env var)
 
 The domain checker path is supplied via the BRIDGE_CHECKER env var, e.g.:
     BRIDGE_CHECKER="python checker/check_certificate.py"
 
-Metadata keys populated on exit 0 (checker passes):
+Obligation IDs are read from the certificate JSON field "obligations":
+    ["obl-a", "obl-b", ...]
+If that field is absent or empty, the default obligation ["cap.checker-pass"]
+is used. Different Weil claims may declare different obligation sets; the bridge
+does not hard-code any claim-specific IDs.
+
+On checker exit 0, each obligation gets verdict="pass" plus the following
+metadata keys:
     cap_format_version   — from certificate top-level "format_version" field
     digests_fresh        — "true" (proofctl freshness layer guarantees this)
     path_keys_match      — "true" (checker verified A/B key bijection)
@@ -31,6 +39,12 @@ Metadata keys populated on exit 0 (checker passes):
     even_sector_passes   — "true" if certificate "sector" field is "even"
     pivot_radius_ratio   — from certificate "margin_ratio" field if present,
                            or parsed from checker stdout (key=value or JSON)
+
+On checker exit 1, each obligation gets verdict="fail".
+On checker exit 2 (malformed cert), a CheckerErrorV2 is emitted (no
+obligation_results) with error_code="malformed_certificate".
+If BRIDGE_CHECKER is unset, a CheckerErrorV2 is emitted with
+error_code="protocol_error" and the bridge exits 3.
 """
 
 import json
@@ -40,8 +54,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROTOCOL_VERSION = 1
-
+PROTOCOL_VERSION = 2
+_DEFAULT_OBLIGATIONS = ["cap.checker-pass"]
 _EMPTY_RESOURCES = {"wall_millis": 0, "cpu_millis": 0, "mem_bytes": 0}
 
 
@@ -49,36 +63,48 @@ def _read_input() -> dict:
     try:
         return json.load(sys.stdin)
     except json.JSONDecodeError as e:
-        _die(2, f"malformed CheckerInput JSON: {e}")
+        _die(3, f"malformed CheckerInput JSON: {e}")
 
 
-def _out(claim_id: str, outcome: str, assurance: str = "",
-         explanation: str = "", error_code: str = "",
-         metadata: dict = None) -> dict:
-    """Build a protocol-compliant CheckerOutput dict."""
+def _out_obligations(claim_id: str, obligation_ids: list, verdict: str,
+                     explanation: str = "", metadata: dict = None) -> dict:
+    """Build a protocol v2 CheckerOutput with obligation_results."""
+    results = []
+    for obl_id in obligation_ids:
+        r = {"obligation_id": obl_id, "verdict": verdict}
+        if explanation:
+            r["explanation"] = explanation
+        if metadata:
+            r["metadata"] = metadata
+        results.append(r)
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "claim_id": claim_id,
+        "obligation_results": results,
+        "resources": _EMPTY_RESOURCES,
+    }
+
+
+def _out_error(claim_id: str, error_code: str, explanation: str = "") -> dict:
+    """Build a protocol v2 CheckerErrorV2 (no obligation_results)."""
     o = {
         "protocol_version": PROTOCOL_VERSION,
         "claim_id": claim_id,
-        "outcome": outcome,
-        "assurance": assurance,
+        "error_code": error_code,
         "resources": _EMPTY_RESOURCES,
     }
     if explanation:
         o["explanation"] = explanation
-    if error_code:
-        o["error_code"] = error_code
-    if metadata:
-        o["metadata"] = metadata
     return o
 
 
 def _die(exit_code: int, message: str) -> None:
-    out = _out("", "error", error_code="malformed_input", explanation=message)
-    json.dump(out, sys.stdout)
+    """Emit a protocol_error CheckerErrorV2 and exit with exit_code."""
+    json.dump(_out_error("", "protocol_error", message), sys.stdout)
     sys.exit(exit_code)
 
 
-def _find_certificate(evidence: list) -> Path | None:
+def _find_certificate(evidence: list) -> "Path | None":
     """Return the path of the first evidence item that looks like a certificate."""
     for item in evidence:
         hint = item.get("local_path", "") or item.get("path_hint", "")
@@ -90,14 +116,32 @@ def _find_certificate(evidence: list) -> Path | None:
     return None
 
 
-def _read_cert_field(cert_path: Path, field: str) -> str:
+def _read_cert_json(cert_path: Path) -> dict:
+    """Load and return the certificate JSON, or empty dict on error."""
     try:
         with open(cert_path) as f:
-            data = json.load(f)
-        v = data.get(field, "")
-        return str(v) if v else ""
+            return json.load(f)
     except Exception:
-        return ""
+        return {}
+
+
+def _read_cert_field(cert_data: dict, field: str) -> str:
+    """Return a certificate top-level field value as a string, or ""."""
+    v = cert_data.get(field, "")
+    return str(v) if v else ""
+
+
+def _get_obligations(cert_data: dict, claim_id: str) -> list:
+    """Return the obligation IDs to use for this check run.
+
+    Reads the "obligations" list from the certificate JSON if present and
+    non-empty; otherwise returns _DEFAULT_OBLIGATIONS. The bridge does not
+    hard-code claim-specific IDs — each certificate declares its own.
+    """
+    obls = cert_data.get("obligations", [])
+    if isinstance(obls, list) and obls:
+        return [str(o) for o in obls]
+    return list(_DEFAULT_OBLIGATIONS)
 
 
 def _extract_margin_from_stdout(stdout: str) -> str:
@@ -124,10 +168,12 @@ def _extract_margin_from_stdout(stdout: str) -> str:
     except (json.JSONDecodeError, ValueError):
         pass
     # key=value scan (underscore form).
-    for key in ("margin_ratio", "pivot_radius_ratio"):
-        m = re.search(rf"(?:^|[\s,;])(?:pivot_radius_ratio|margin_ratio)\s*=\s*([^\s,;]+)", text, re.IGNORECASE | re.MULTILINE)
-        if m:
-            return m.group(1)
+    m = re.search(
+        r"(?:^|[\s,;])(?:pivot_radius_ratio|margin_ratio)\s*=\s*([^\s,;]+)",
+        text, re.IGNORECASE | re.MULTILINE,
+    )
+    if m:
+        return m.group(1)
     # Natural-language format: "[checker] margin ratio = min_pivot_lo / pivot_width = 33777230.07 (...)"
     # Extract the last numeric value before any trailing parenthetical comment.
     for line in text.splitlines():
@@ -149,11 +195,15 @@ def main() -> None:
     evidence: list = inp.get("evidence", [])
 
     cert_path = _find_certificate(evidence)
+    cert_data = _read_cert_json(cert_path) if cert_path is not None else {}
+    obligation_ids = _get_obligations(cert_data, claim_id)
+
     if cert_path is None:
-        json.dump(_out(claim_id, "rejected", "deterministic-cap",
-                       error_code="evidence_not_found",
-                       explanation="no certificate JSON found in evidence paths"),
-                  sys.stdout)
+        json.dump(
+            _out_obligations(claim_id, obligation_ids, "fail",
+                             explanation="no certificate JSON found in evidence paths"),
+            sys.stdout,
+        )
         sys.exit(0)
 
     # Invoke domain checker.
@@ -167,21 +217,25 @@ def main() -> None:
 
     checker_exit = result.returncode
 
+    # exit 2 — malformed certificate: emit CheckerErrorV2 (no obligation_results).
     if checker_exit == 2:
-        json.dump(_out(claim_id, "error",
-                       error_code="malformed_certificate",
-                       explanation=result.stderr.strip() or "certificate schema violation (exit 2)"),
-                  sys.stdout)
+        json.dump(
+            _out_error(claim_id, "malformed_certificate",
+                       result.stderr.strip() or "certificate schema violation (exit 2)"),
+            sys.stdout,
+        )
         sys.exit(0)
 
+    # exit != 0 (and not 2) — checker rejected the proof: all obligations fail.
     if checker_exit != 0:
-        json.dump(_out(claim_id, "rejected", "deterministic-cap",
-                       error_code="proof_rejected",
-                       explanation=result.stderr.strip() or f"checker exit {checker_exit}"),
-                  sys.stdout)
+        json.dump(
+            _out_obligations(claim_id, obligation_ids, "fail",
+                             explanation=result.stderr.strip() or f"checker exit {checker_exit}"),
+            sys.stdout,
+        )
         sys.exit(0)
 
-    # exit 0 — CERTIFIED. Build metadata.
+    # exit 0 — CERTIFIED. Build shared metadata; all obligations pass.
     metadata: dict = {
         "digests_fresh": "true",
         "path_keys_match": "true",
@@ -190,159 +244,27 @@ def main() -> None:
         "ldlt_passes": "true",
     }
 
-    fmt_ver = _read_cert_field(cert_path, "format_version")
+    fmt_ver = _read_cert_field(cert_data, "format_version")
     if fmt_ver:
         metadata["cap_format_version"] = fmt_ver
 
     # pivot_radius_ratio: prefer cert top-level field, fall back to checker stdout.
-    margin = _read_cert_field(cert_path, "margin_ratio")
+    margin = _read_cert_field(cert_data, "margin_ratio")
     if not margin:
         margin = _extract_margin_from_stdout(result.stdout)
     if margin:
         metadata["pivot_radius_ratio"] = margin
 
-    sector = _read_cert_field(cert_path, "sector")
+    sector = _read_cert_field(cert_data, "sector")
     if sector == "odd":
         metadata["odd_sector_passes"] = "true"
     elif sector == "even":
         metadata["even_sector_passes"] = "true"
 
-    json.dump(_out(claim_id, "accepted", "deterministic-cap", metadata=metadata),
-              sys.stdout)
-    sys.exit(0)
-
-
-if __name__ == "__main__":
-    main()
-
-
-PROTOCOL_VERSION = 1
-
-_EMPTY_RESOURCES = {"wall_millis": 0, "cpu_millis": 0, "mem_bytes": 0}
-
-
-def _read_input() -> dict:
-    try:
-        return json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        _die(2, f"malformed CheckerInput JSON: {e}")
-
-
-def _out(claim_id: str, outcome: str, assurance: str = "",
-         explanation: str = "", error_code: str = "",
-         metadata: dict = None) -> dict:
-    """Build a protocol-compliant CheckerOutput dict."""
-    o = {
-        "protocol_version": PROTOCOL_VERSION,
-        "claim_id": claim_id,
-        "outcome": outcome,
-        "assurance": assurance,
-        "resources": _EMPTY_RESOURCES,
-    }
-    if explanation:
-        o["explanation"] = explanation
-    if error_code:
-        o["error_code"] = error_code
-    if metadata:
-        o["metadata"] = metadata
-    return o
-
-
-def _die(exit_code: int, message: str) -> None:
-    out = _out("", "error", error_code="malformed_input", explanation=message)
-    json.dump(out, sys.stdout)
-    sys.exit(exit_code)
-
-
-def _find_certificate(evidence: list) -> Path | None:
-    """Return the path of the first evidence item that looks like a certificate."""
-    for item in evidence:
-        hint = item.get("local_path", "") or item.get("path_hint", "")
-        media = item.get("media_type", "")
-        if hint.endswith(".json") or "certificate" in media or "certificate" in hint:
-            p = Path(hint)
-            if p.exists():
-                return p
-    return None
-
-
-def _read_cert_field(cert_path: Path, field: str) -> str:
-    try:
-        with open(cert_path) as f:
-            data = json.load(f)
-        v = data.get(field, "")
-        return str(v) if v else ""
-    except Exception:
-        return ""
-
-
-def main() -> None:
-    checker_cmd = os.environ.get("BRIDGE_CHECKER", "")
-    if not checker_cmd:
-        _die(3, "BRIDGE_CHECKER environment variable not set")
-
-    inp = _read_input()
-    claim_id: str = inp.get("claim_id", "")
-    evidence: list = inp.get("evidence", [])
-
-    cert_path = _find_certificate(evidence)
-    if cert_path is None:
-        json.dump(_out(claim_id, "rejected", "deterministic-cap",
-                       error_code="evidence_not_found",
-                       explanation="no certificate JSON found in evidence paths"),
-                  sys.stdout)
-        sys.exit(0)
-
-    # Invoke domain checker.
-    cmd = checker_cmd.split() + [str(cert_path)]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-    except FileNotFoundError as e:
-        _die(2, f"checker not found: {e}")
-    except Exception as e:
-        _die(2, f"checker subprocess error: {e}")
-
-    checker_exit = result.returncode
-
-    if checker_exit == 2:
-        json.dump(_out(claim_id, "error",
-                       error_code="malformed_certificate",
-                       explanation=result.stderr.strip() or "certificate schema violation (exit 2)"),
-                  sys.stdout)
-        sys.exit(0)
-
-    if checker_exit != 0:
-        json.dump(_out(claim_id, "rejected", "deterministic-cap",
-                       error_code="proof_rejected",
-                       explanation=result.stderr.strip() or f"checker exit {checker_exit}"),
-                  sys.stdout)
-        sys.exit(0)
-
-    # exit 0 — CERTIFIED. Build metadata.
-    metadata: dict = {
-        "digests_fresh": "true",
-        "path_keys_match": "true",
-        "intervals_intersect": "true",
-        "matrix_reconstructed": "true",
-        "ldlt_passes": "true",
-    }
-
-    fmt_ver = _read_cert_field(cert_path, "format_version")
-    if fmt_ver:
-        metadata["cap_format_version"] = fmt_ver
-
-    margin = _read_cert_field(cert_path, "margin_ratio")
-    if margin:
-        metadata["pivot_radius_ratio"] = margin
-
-    sector = _read_cert_field(cert_path, "sector")
-    if sector == "odd":
-        metadata["odd_sector_passes"] = "true"
-    elif sector == "even":
-        metadata["even_sector_passes"] = "true"
-
-    json.dump(_out(claim_id, "accepted", "deterministic-cap", metadata=metadata),
-              sys.stdout)
+    json.dump(
+        _out_obligations(claim_id, obligation_ids, "pass", metadata=metadata),
+        sys.stdout,
+    )
     sys.exit(0)
 
 

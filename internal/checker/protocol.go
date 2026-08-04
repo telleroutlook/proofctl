@@ -13,9 +13,6 @@ const (
 	ExitProtocolError = 3
 )
 
-// ProtocolVersion is the current checker protocol version.
-const ProtocolVersion = 1
-
 // Resource limits for checker invocations.
 const (
 	// DefaultWallTimeoutSec is the default wall-clock timeout for a checker.

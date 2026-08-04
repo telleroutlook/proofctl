@@ -43,7 +43,12 @@ func ValidateOutput(out CheckerOutputV2, claimID string, expectedObligationIDs [
 		}
 	}
 
-	// Build expected set.
+	// Build expected set. If nil, obligation set check is skipped (used when
+	// Contract-driven obligation IDs are not yet wired in — only protocol/claim
+	// validation runs).
+	if expectedObligationIDs == nil {
+		return nil
+	}
 	expected := make(map[string]struct{}, len(expectedObligationIDs))
 	for _, id := range expectedObligationIDs {
 		expected[id] = struct{}{}

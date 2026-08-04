@@ -135,7 +135,7 @@ func cmdVerify(args []string, useJSON bool) {
 			return out
 		}
 		inputJSON, _ := json.Marshal(map[string]any{
-			"protocol_version": 1,
+			"protocol_version": 2,
 			"claim_ids": func() []string {
 				ids := make([]string, len(groupClaims))
 				for i, c := range groupClaims {
@@ -165,15 +165,22 @@ func cmdVerify(args []string, useJSON bool) {
 			return out
 		}
 		for _, cr := range claimResults {
+			allPass := len(cr.ObligationResults) > 0
+			for _, r := range cr.ObligationResults {
+				if r.Verdict != "pass" {
+					allPass = false
+					break
+				}
+			}
 			outcome := "rejected"
-			if cr.OK {
+			if allPass {
 				outcome = "accepted"
 			}
 			att := &ir.Attestation{
 				ClaimID:   cr.ClaimID,
 				Outcome:   outcome,
-				Assurance: ir.Assurance(cr.Assurance),
-				Metadata:  cr.Metadata,
+				Assurance: "", // v2: proofverify derives assurance
+				Toolchain: cr.Toolchain,
 			}
 			data, marshalErr := json.MarshalIndent(att, "", "  ")
 			if marshalErr != nil {
@@ -188,9 +195,8 @@ func cmdVerify(args []string, useJSON bool) {
 				continue
 			}
 			resultByID[cr.ClaimID] = verifyResult{
-				ClaimID:   cr.ClaimID,
-				Outcome:   outcome,
-				Assurance: cr.Assurance,
+				ClaimID: cr.ClaimID,
+				Outcome: outcome,
 			}
 		}
 		out := make([]verifyResult, len(groupClaims))

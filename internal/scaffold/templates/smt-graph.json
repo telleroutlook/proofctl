@@ -40,7 +40,7 @@
   "checkers": [
     {
       "id": "smt-checker-v1",
-      "protocol_version": 1,
+      "protocol_version": 2,
       "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       "runtime": {
         "kind": "native",

@@ -12,6 +12,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/cas"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/runner"
+	protov2 "github.com/telleroutlook/proofctl/pkg/protocol/v2"
 )
 
 // TestWriteAttestationAtomic_InvalidClaimID verifies that writeAttestationAtomic
@@ -46,35 +47,46 @@ func TestWriteAttestationAtomic_ReadOnlyDir(t *testing.T) {
 	}
 }
 
-// TestParseCheckerOutput_MissingOutcome verifies that an output JSON with no
-// "outcome" field is rejected.
-func TestParseCheckerOutput_MissingOutcome(t *testing.T) {
+// TestParseCheckerOutputV2_InvalidJSON verifies that invalid JSON is rejected.
+func TestParseCheckerOutputV2_InvalidJSON(t *testing.T) {
 	t.Parallel()
-	data := []byte(`{"protocol_version":1,"claim_id":"c1"}`)
-	_, err := parseCheckerOutput(data)
-	if err == nil {
-		t.Fatal("expected error for missing outcome, got nil")
-	}
-}
-
-// TestParseCheckerOutput_NonJSONObject verifies that non-JSON output is rejected.
-func TestParseCheckerOutput_NonJSONObject(t *testing.T) {
-	t.Parallel()
-	_, err := parseCheckerOutput([]byte(`not json`))
+	var out protov2.CheckerOutputV2
+	err := json.Unmarshal([]byte(`not json`), &out)
 	if err == nil {
 		t.Fatal("expected error for non-JSON output, got nil")
 	}
 }
 
-// TestTryParseCheckerOutput_InvalidReturnsNil verifies that tryParseCheckerOutput
-// returns nil (not a panic) for invalid input.
-func TestTryParseCheckerOutput_InvalidReturnsNil(t *testing.T) {
+// TestValidateOutputV2_MissingObligation verifies that a v2 output missing
+// expected obligations is rejected.
+func TestValidateOutputV2_MissingObligation(t *testing.T) {
 	t.Parallel()
-	if got := tryParseCheckerOutput([]byte(`bad`)); got != nil {
-		t.Errorf("expected nil for invalid input, got %+v", got)
+	out := protov2.CheckerOutputV2{
+		ProtocolVersion: 2,
+		ClaimID:         "c1",
+		ObligationResults: []protov2.ObligationResult{
+			{ID: "obl-a", Verdict: protov2.VerdictPass},
+		},
 	}
-	if got := tryParseCheckerOutput(nil); got != nil {
-		t.Errorf("expected nil for nil input, got %+v", got)
+	err := protov2.ValidateOutput(out, "c1", []string{"obl-a", "obl-b"})
+	if err == nil {
+		t.Fatal("expected error for missing obligation, got nil")
+	}
+}
+
+// TestValidateOutputV2_InvalidVerdict verifies that an invalid verdict is rejected.
+func TestValidateOutputV2_InvalidVerdict(t *testing.T) {
+	t.Parallel()
+	out := protov2.CheckerOutputV2{
+		ProtocolVersion: 2,
+		ClaimID:         "c1",
+		ObligationResults: []protov2.ObligationResult{
+			{ID: "obl-a", Verdict: "accepted"},
+		},
+	}
+	err := protov2.ValidateOutput(out, "c1", []string{"obl-a"})
+	if err == nil {
+		t.Fatal("expected error for invalid verdict 'accepted', got nil")
 	}
 }
 

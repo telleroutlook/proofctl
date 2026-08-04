@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/telleroutlook/proofctl/internal/ir"
-	"github.com/telleroutlook/proofctl/pkg/protocol"
+	protov2 "github.com/telleroutlook/proofctl/pkg/protocol/v2"
 )
 
 // TestMain implements the helper-process pattern so that tests can use
@@ -33,14 +33,16 @@ func TestMain(m *testing.M) {
 	}
 	// Helper-process mode: act as a minimal fake checker and exit.
 	mode := os.Getenv("GO_HELPER_MODE")
-	out := protocol.CheckerOutput{
-		ProtocolVersion: protocol.ProtocolVersion,
-		ClaimID:         "test-claim",
-		Outcome:         "accepted",
-		Assurance:       string(ir.AssuranceDeterministicCAP),
-	}
+	verdict := protov2.VerdictPass
 	if mode == "fail" {
-		out.Outcome = "rejected"
+		verdict = protov2.VerdictFail
+	}
+	out := protov2.CheckerOutputV2{
+		ProtocolVersion: protov2.ProtocolVersion,
+		ClaimID:         "test-claim",
+		ObligationResults: []protov2.ObligationResult{
+			{ID: "test.check", Verdict: verdict},
+		},
 	}
 	data, _ := json.Marshal(out)
 	fmt.Printf("%s\n", data)
@@ -252,12 +254,12 @@ func TestNativeRunner_CheckerPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var out protocol.CheckerOutput
+	var out protov2.CheckerOutputV2
 	if jsonErr := json.Unmarshal(res, &out); jsonErr != nil {
 		t.Fatalf("unmarshal output: %v", jsonErr)
 	}
-	if out.Outcome != "accepted" {
-		t.Errorf("expected outcome 'accepted', got %q", out.Outcome)
+	if len(out.ObligationResults) == 0 || out.ObligationResults[0].Verdict != protov2.VerdictPass {
+		t.Errorf("expected pass verdict, got %+v", out.ObligationResults)
 	}
 }
 

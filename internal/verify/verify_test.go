@@ -14,7 +14,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/dag"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/runner"
-	"github.com/telleroutlook/proofctl/pkg/protocol"
+	protov2 "github.com/telleroutlook/proofctl/pkg/protocol/v2"
 )
 
 // mockRunner implements runner.Runner for tests.
@@ -86,13 +86,18 @@ func makeTestCAS(t *testing.T) (*cas.Store, ir.EvidenceDescriptor, string) {
 	return store, desc, blobFile
 }
 
-// checkerOutput returns marshalled protocol.CheckerOutput for a given outcome.
-func checkerOutput(outcome, assurance string) []byte {
-	out := protocol.CheckerOutput{
-		ProtocolVersion: protocol.ProtocolVersion,
+// checkerOutput returns marshalled CheckerOutputV2 for a given pass/fail state.
+func checkerOutput(outcome, _ string) []byte {
+	verdict := protov2.VerdictPass
+	if outcome != "accepted" {
+		verdict = protov2.VerdictFail
+	}
+	out := protov2.CheckerOutputV2{
+		ProtocolVersion: protov2.ProtocolVersion,
 		ClaimID:         "claim-1",
-		Outcome:         outcome,
-		Assurance:       assurance,
+		ObligationResults: []protov2.ObligationResult{
+			{ID: "test.check", Verdict: verdict},
+		},
 	}
 	data, _ := json.Marshal(out)
 	return data
@@ -108,7 +113,7 @@ func TestAdversarial_MaliciousClaimID_PathWrite(t *testing.T) {
 	attestDir := filepath.Join(dir, "attestations")
 
 	store, desc, _ := makeTestCAS(t)
-	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 2}
 
 	// Build a DAG that contains a claim whose ID embeds a path traversal sequence.
 	maliciousID := "../escaped-payload"
@@ -149,7 +154,7 @@ func TestCacheHit(t *testing.T) {
 
 	store, desc, _ := makeTestCAS(t)
 	g := makeTestDAG("claim-1")
-	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 2}
 
 	// Compute the exact cache key the pipeline would compute.
 	claim := g.Claim("claim-1")
@@ -194,7 +199,7 @@ func TestCacheMissCheckerPass(t *testing.T) {
 
 	store, desc, _ := makeTestCAS(t)
 	g := makeTestDAG("claim-1")
-	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 2}
 
 	p := &Pipeline{
 		DAG:       g,
@@ -234,7 +239,7 @@ func TestMissingEvidence(t *testing.T) {
 		t.Fatalf("cas.New: %v", err)
 	}
 	g := makeTestDAG("claim-1")
-	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 2}
 
 	badDesc := ir.EvidenceDescriptor{
 		MediaType: "text/plain",
@@ -265,7 +270,7 @@ func TestFreshnessDrift(t *testing.T) {
 
 	store, desc, blobFile := makeTestCAS(t)
 	g := makeTestDAG("claim-1")
-	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 2}
 
 	p := &Pipeline{
 		DAG:       g,
@@ -290,7 +295,7 @@ func TestCheckerFail(t *testing.T) {
 
 	store, desc, _ := makeTestCAS(t)
 	g := makeTestDAG("claim-1")
-	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 2}
 
 	// Exit 1: checker ran, claim rejected. The runner also provides output.
 	p := &Pipeline{
@@ -319,7 +324,7 @@ func TestCheckerUnavailable(t *testing.T) {
 
 	store, desc, _ := makeTestCAS(t)
 	g := makeTestDAG("claim-1")
-	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 1}
+	checkerID := ir.CheckerIdentity{ID: "test-checker", ProtocolVersion: 2}
 
 	p := &Pipeline{
 		DAG:       g,

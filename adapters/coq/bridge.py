@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Coq/Rocq checker bridge for proofctl.
+Coq/Rocq checker bridge for proofctl — protocol v2.
 
 Usage:
     bridge.py <cert-file>
@@ -8,22 +8,48 @@ Usage:
 The cert-file is a JSON object with fields:
     vo_files    - list of .vo compiled object files to verify (or omit for all)
     coq_root    - project root where _CoqProject lives; defaults to "."
+    theorem_vo  - optional path to the target theorem's .vo file;
+                  used to resolve the coq.theorem-vo-valid obligation
 
-The bridge runs 'coqchk -silent <vo_files>' and captures toolchain info
-(coq_version, opam_hash) for the M14 ToolchainDigest mechanism.
+The bridge runs 'coqchk -silent <vo_files>' and emits a v2 CheckerOutputV2
+with per-obligation verdicts for:
+    coq.coqchk-succeeds   — coqchk kernel check passed
+    coq.theorem-vo-valid  — target theorem's .vo file is valid
 
-All theorems in a Coq project share batch_group "coq-env" (M13 BatchRunner).
+Obligation rules:
+    coqchk passes + theorem_vo found  → both pass
+    coqchk fails                      → both fail
+    coqchk passes + theorem_vo absent → coqchk pass, theorem-vo-valid fail
 
 Exit codes:
-    0  coqchk succeeded — all proofs accepted
-    1  coqchk failed — proof rejected
-    2  coqchk not found in PATH
-    3  protocol error (bad cert-file format)
+    0  obligation results written (checkerOutputV2; individual verdicts may be fail)
+    2  coqchk not found in PATH (CheckerErrorV2)
+    3  protocol error / bad cert-file (CheckerErrorV2)
 """
+import hashlib
 import json
 import os
 import subprocess
 import sys
+
+PROTOCOL_VERSION = 2
+OBL_COQCHK = "coq.coqchk-succeeds"
+OBL_THM_VO = "coq.theorem-vo-valid"
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    except Exception:
+        return ""
+    return "sha256:" + h.hexdigest()
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _run(cmd: list, cwd: str, timeout: int = 600) -> tuple:
@@ -59,12 +85,10 @@ def _opam_hash(cwd: str) -> str:
     if code != 0:
         return "unknown"
     switch_name = out.strip()
-    # Hash the installed package list for a more stable identifier.
     code2, out2, _ = _run(["opam", "list", "--installed", "--short"], cwd, timeout=30)
     if code2 != 0:
         return switch_name
-    import hashlib
-    return hashlib.sha256(out2.encode()).hexdigest()[:16]
+    return "sha256:" + hashlib.sha256(out2.encode()).hexdigest()[:16]
 
 
 def _find_vo_files(coq_root: str) -> list:
@@ -77,13 +101,40 @@ def _find_vo_files(coq_root: str) -> list:
     return vo_files
 
 
-def _output(outcome: str, claim_id: str, metadata: dict, toolchain: dict = None) -> None:
-    obj: dict = {
-        "protocol_version": 1,
+def _error_out(code: str, message: str, claim_id: str = "", exit_code: int = 3) -> None:
+    """Emit a CheckerErrorV2 and exit."""
+    print(json.dumps({
+        "protocol_version": PROTOCOL_VERSION,
         "claim_id": claim_id,
-        "outcome": outcome,
-        "assurance": "formal-kernel",
-        "metadata": metadata,
+        "code": code,
+        "message": message,
+    }))
+    sys.exit(exit_code)
+
+
+def _obl_result(obl_id: str, verdict: str, method: str = "") -> dict:
+    r: dict = {"id": obl_id, "verdict": verdict}
+    if method:
+        r["method"] = method
+    return r
+
+
+def _output(
+    claim_id: str,
+    cert_digest: str,
+    obligation_results: list,
+    toolchain: dict = None,
+) -> None:
+    """Emit a CheckerOutputV2."""
+    checker_digest = _sha256_file(os.path.abspath(__file__))
+    obj: dict = {
+        "protocol_version": PROTOCOL_VERSION,
+        "claim_id": claim_id,
+        "input_closure_digest": cert_digest,
+        "checker_identity_digest": checker_digest,
+        "runtime_identity_digest": "",
+        "evidence_used": [cert_digest] if cert_digest else [],
+        "obligation_results": obligation_results,
     }
     if toolchain:
         obj["toolchain"] = toolchain
@@ -92,39 +143,46 @@ def _output(outcome: str, claim_id: str, metadata: dict, toolchain: dict = None)
 
 def main() -> int:
     if len(sys.argv) != 2:
-        _output("error", "", {"error": "usage: bridge.py <cert-file>"})
-        return 3
+        _error_out("PROTOCOL_ERROR", "usage: bridge.py <cert-file>", exit_code=3)
 
     cert_path = sys.argv[1]
     try:
-        with open(cert_path, encoding="utf-8") as f:
-            cert = json.load(f)
+        with open(cert_path, "rb") as f:
+            cert_raw = f.read()
+        cert = json.loads(cert_raw)
     except Exception as exc:
-        _output("error", "", {"error": f"cannot read cert-file: {exc}"})
-        return 3
+        _error_out("PROTOCOL_ERROR", f"cannot read cert-file: {exc}", exit_code=3)
 
+    cert_digest = _sha256_bytes(cert_raw)
     coq_root = cert.get("coq_root", ".")
     claim_id = cert.get("claim_id", "")
     vo_files = cert.get("vo_files", [])
+    theorem_vo = cert.get("theorem_vo", "")
 
     if not os.path.isabs(coq_root):
         base = os.path.dirname(os.path.abspath(cert_path))
         coq_root = os.path.normpath(os.path.join(base, coq_root))
 
+    # Resolve theorem_vo relative to cert location if not absolute.
+    if theorem_vo and not os.path.isabs(theorem_vo):
+        base = os.path.dirname(os.path.abspath(cert_path))
+        theorem_vo = os.path.normpath(os.path.join(base, theorem_vo))
+
     # Check coqchk is available.
     code, _, _ = _run(["coqchk", "--version"], coq_root, timeout=15)
     if code == -2:
-        _output("error", claim_id, {"error": "coqchk not found in PATH"})
-        return 2
+        _error_out("CHECKER_UNAVAILABLE", "coqchk not found in PATH", claim_id, exit_code=2)
 
     # If no vo_files specified, discover all .vo under coq_root.
     if not vo_files:
         vo_files = _find_vo_files(coq_root)
         if not vo_files:
-            _output("error", claim_id, {
-                "error": f"no .vo files found under {coq_root} — run 'coqc' first"
-            })
-            return 3
+            _error_out(
+                "PROTOCOL_ERROR",
+                f"no .vo files found under {coq_root} — run 'coqc' first",
+                claim_id,
+                exit_code=3,
+            )
 
     coq_ver = _coq_version(coq_root)
     opam_h = _opam_hash(coq_root)
@@ -133,34 +191,45 @@ def main() -> int:
         "opam_hash": opam_h,
     }
 
+    # Determine whether the theorem's .vo file is present before running coqchk.
+    # If theorem_vo is not specified, presence is assumed (any .vo files were found).
+    if theorem_vo:
+        theorem_vo_present = os.path.isfile(theorem_vo)
+    else:
+        theorem_vo_present = True
+
     # Run coqchk on all .vo files.
     cmd = ["coqchk", "-silent"] + vo_files
     code, stdout, stderr = _run(cmd, coq_root)
 
-    if code == -1:
-        _output("rejected", claim_id, {
-            "coq_root": coq_root,
-            "error": "coqchk timed out",
-        }, toolchain)
-        return 1
-
     if code == -2:
-        _output("error", claim_id, {"error": "coqchk not found in PATH"})
-        return 2
+        _error_out("CHECKER_UNAVAILABLE", "coqchk not found in PATH", claim_id, exit_code=2)
 
+    # coqchk failed (includes timeout code -1 and non-zero exit): both obligations fail.
     if code != 0:
-        error_lines = (stdout + stderr).splitlines()
-        _output("rejected", claim_id, {
-            "coq_root": coq_root,
-            "vo_count": str(len(vo_files)),
-            "error": "; ".join(error_lines[:5]),
-        }, toolchain)
-        return 1
+        _output(
+            claim_id,
+            cert_digest,
+            [
+                _obl_result(OBL_COQCHK, "fail"),
+                _obl_result(OBL_THM_VO, "fail"),
+            ],
+            toolchain,
+        )
+        return 0
 
-    _output("accepted", claim_id, {
-        "coq_root": coq_root,
-        "vo_count": str(len(vo_files)),
-    }, toolchain)
+    # coqchk succeeded: coq.coqchk-succeeds passes.
+    # coq.theorem-vo-valid passes only if the theorem's .vo file was present.
+    thm_verdict = "pass" if theorem_vo_present else "fail"
+    _output(
+        claim_id,
+        cert_digest,
+        [
+            _obl_result(OBL_COQCHK, "pass"),
+            _obl_result(OBL_THM_VO, thm_verdict),
+        ],
+        toolchain,
+    )
     return 0
 
 

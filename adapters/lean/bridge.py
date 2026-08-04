@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lean 4 checker bridge for proofctl.
+Lean 4 checker bridge for proofctl (protocol v2).
 
 Usage:
     bridge.py <cert-file>
@@ -10,14 +10,17 @@ The cert-file is a JSON object with fields:
     theorem     - fully qualified Lean 4 theorem name
     lake_root   - project root (where lakefile.lean lives); defaults to "."
 
-The bridge runs 'lake build' in lake_root and checks for errors.
-It captures lean_version, mathlib_commit (from lake-manifest.json),
-and lake_version for the toolchain field.
+The bridge runs 'lake build' in lake_root and verifies the theorem is
+reachable via 'lake env lean --stdin'.
+
+Obligations emitted:
+    lean.lake-build-succeeds   - pass if lake build exits 0
+    lean.theorem-type-checks   - pass if build passes AND lean can #check the theorem
 
 Exit codes:
-    0  lake build succeeded
-    1  lake build failed (proof rejected)
-    2  lake or lean not found in PATH
+    0  all obligations pass
+    1  one or more obligations fail (proof uncertified)
+    2  lean or lake not found in PATH (checker unavailable)
     3  protocol error (bad cert-file format)
 """
 import json
@@ -26,11 +29,22 @@ import subprocess
 import sys
 
 
-def _run(cmd: list, cwd: str, timeout: int = 600) -> tuple:
+OBLIGATIONS = [
+    "lean.lake-build-succeeds",
+    "lean.theorem-type-checks",
+]
+
+
+def _run(cmd: list, cwd: str, timeout: int = 600, input_data: str = None) -> tuple:
     """Run a command and return (returncode, stdout, stderr)."""
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=cwd, timeout=timeout
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=timeout,
+            input=input_data,
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
@@ -78,17 +92,51 @@ def _mathlib_commit(lake_root: str) -> str:
     return "unknown"
 
 
-def _output(outcome: str, claim_id: str, metadata: dict, toolchain: dict = None) -> None:
+def _theorem_exists(theorem: str, lake_root: str) -> bool:
+    """Check if the theorem is reachable via 'lake env lean --stdin'."""
+    code, _, _ = _run(
+        ["lake", "env", "lean", "--stdin"],
+        cwd=lake_root,
+        timeout=60,
+        input_data=f"#check @{theorem}\n",
+    )
+    return code == 0
+
+
+def _make_obligations(lake_pass: bool, theorem_pass: bool) -> list:
+    return [
+        {
+            "obligation": "lean.lake-build-succeeds",
+            "verdict": "pass" if lake_pass else "fail",
+        },
+        {
+            "obligation": "lean.theorem-type-checks",
+            "verdict": "pass" if (lake_pass and theorem_pass) else "fail",
+        },
+    ]
+
+
+def _output_v2(claim_id: str, obligation_results: list, toolchain: dict = None) -> None:
     obj: dict = {
-        "protocol_version": 1,
+        "protocol_version": 2,
         "claim_id": claim_id,
-        "outcome": outcome,
-        "assurance": "formal-kernel",
-        "metadata": metadata,
+        "input_closure_digest": "",
+        "checker_identity_digest": "",
+        "runtime_identity_digest": "",
+        "evidence_used": [],
+        "obligation_results": obligation_results,
     }
     if toolchain:
         obj["toolchain"] = toolchain
     print(json.dumps(obj))
+
+
+def _error_v2(claim_id: str, error: str) -> None:
+    print(json.dumps({
+        "protocol_version": 2,
+        "claim_id": claim_id,
+        "error": error,
+    }))
 
 
 def _check_cross_domain_imports(lake_root: str, attest_dir: str) -> str:
@@ -160,7 +208,7 @@ def _check_cross_domain_imports(lake_root: str, attest_dir: str) -> str:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        _output("error", "", {"error": "usage: bridge.py <cert-file>"})
+        _error_v2("", "usage: bridge.py <cert-file>")
         return 3
 
     cert_path = sys.argv[1]
@@ -168,7 +216,7 @@ def main() -> int:
         with open(cert_path, encoding="utf-8") as f:
             cert = json.load(f)
     except Exception as exc:
-        _output("error", "", {"error": f"cannot read cert-file: {exc}"})
+        _error_v2("", f"cannot read cert-file: {exc}")
         return 3
 
     lean_file = cert.get("lean_file", "")
@@ -177,7 +225,7 @@ def main() -> int:
     claim_id = cert.get("claim_id", "")
 
     if not lean_file or not theorem:
-        _output("error", claim_id, {"error": "cert-file must contain 'lean_file' and 'theorem'"})
+        _error_v2(claim_id, "cert-file must contain 'lean_file' and 'theorem'")
         return 3
 
     # Resolve lake_root relative to cert_file's directory if relative.
@@ -186,9 +234,9 @@ def main() -> int:
         lake_root = os.path.normpath(os.path.join(base, lake_root))
 
     # Check lake is available.
-    code, _, err = _run(["lake", "--version"], lake_root, timeout=10)
+    code, _, _ = _run(["lake", "--version"], lake_root, timeout=10)
     if code == -2:
-        _output("error", claim_id, {"error": "lake not found in PATH"})
+        _error_v2(claim_id, "lake not found in PATH")
         return 2
 
     # Check cross-domain claim integrity BEFORE lake build.
@@ -196,26 +244,29 @@ def main() -> int:
     attest_dir = cert.get("attest_dir", os.path.join(lake_root, ".proofctl", "attestations"))
     xd_error = _check_cross_domain_imports(lake_root, attest_dir)
     if xd_error:
-        _output("rejected", claim_id, {
-            "lean_file": lean_file,
-            "theorem": theorem,
-            "error": xd_error,
-        })
+        toolchain = {
+            "lean_version": _lean_version(lake_root),
+            "lake_version": _lake_version(lake_root),
+            "mathlib_commit": _mathlib_commit(lake_root),
+        }
+        _output_v2(claim_id, _make_obligations(False, False), toolchain)
         return 1
 
     # Run lake build.
-    code, stdout, stderr = _run(["lake", "build"], lake_root)
+    build_code, build_stdout, build_stderr = _run(["lake", "build"], lake_root)
 
-    if code == -1:
-        _output("rejected", claim_id, {
-            "lean_file": lean_file,
-            "theorem": theorem,
-            "error": "lake build timed out",
-        })
+    if build_code == -1:
+        # Timed out — treat as build failure.
+        toolchain = {
+            "lean_version": _lean_version(lake_root),
+            "lake_version": _lake_version(lake_root),
+            "mathlib_commit": _mathlib_commit(lake_root),
+        }
+        _output_v2(claim_id, _make_obligations(False, False), toolchain)
         return 1
 
-    if code == -2:
-        _output("error", claim_id, {"error": "lake not found in PATH"})
+    if build_code == -2:
+        _error_v2(claim_id, "lake not found in PATH")
         return 2
 
     # Capture toolchain info regardless of outcome.
@@ -228,20 +279,15 @@ def main() -> int:
         "mathlib_commit": mathlib_commit,
     }
 
-    if code != 0:
-        error_lines = (stdout + stderr).splitlines()
-        _output("rejected", claim_id, {
-            "lean_file": lean_file,
-            "theorem": theorem,
-            "error": "; ".join(error_lines[:5]),
-        }, toolchain)
+    if build_code != 0:
+        # lake build failed — both obligations fail.
+        _output_v2(claim_id, _make_obligations(False, False), toolchain)
         return 1
 
-    _output("accepted", claim_id, {
-        "lean_file": lean_file,
-        "theorem": theorem,
-    }, toolchain)
-    return 0
+    # Build succeeded — verify the theorem is reachable.
+    theorem_ok = _theorem_exists(theorem, lake_root)
+    _output_v2(claim_id, _make_obligations(True, theorem_ok), toolchain)
+    return 0 if theorem_ok else 1
 
 
 if __name__ == "__main__":

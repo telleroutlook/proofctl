@@ -24,7 +24,7 @@ const CheckerPolicyID = "lrat-checker-v1"
 // In Phase 7, this uses a native dev runner (shadow mode).
 var LRATCheckerID = ir.CheckerIdentity{
 	ID:              "lrat-checker-v1",
-	ProtocolVersion: 1,
+	ProtocolVersion: 2,
 	CheckerDigest:   "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 	SchemaDigest:    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 	Runtime:         ir.Runtime{Kind: "native"},

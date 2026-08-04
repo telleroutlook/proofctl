@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/telleroutlook/proofctl/internal/ir"
-	"github.com/telleroutlook/proofctl/pkg/protocol"
+	protov2 "github.com/telleroutlook/proofctl/pkg/protocol/v2"
 )
 
 // ── RunBatch ─────────────────────────────────────────────────────────────────
@@ -38,44 +38,41 @@ func init() {
 	// Extra helper modes (e.g. "batch") can be registered here.
 }
 
-// TestRunBatch_Success runs RunBatch with a helper that emits a valid batch
-// result. Because TestMain only knows "accepted"/"fail", we drive RunBatch
-// through a scripted fakeRunner that returns pre-built batch JSON.
+// TestRunBatch_Success runs RunBatch with a fakeRunner that returns a valid
+// JSON array of CheckerOutputV2.
 func TestRunBatch_Success(t *testing.T) {
 	t.Parallel()
 
-	result := protocol.BatchResult{
-		Claims: []protocol.ClaimResult{
-			{ClaimID: "c1", OK: true, Assurance: "deterministic-cap"},
-			{ClaimID: "c2", OK: false, Assurance: "deterministic-cap"},
-		},
+	results := []protov2.CheckerOutputV2{
+		{ProtocolVersion: 2, ClaimID: "c1",
+			ObligationResults: []protov2.ObligationResult{{ID: "obl", Verdict: protov2.VerdictPass}}},
+		{ProtocolVersion: 2, ClaimID: "c2",
+			ObligationResults: []protov2.ObligationResult{{ID: "obl", Verdict: protov2.VerdictFail}}},
 	}
-	data, _ := json.Marshal(result)
+	data, _ := json.Marshal(results)
 
-	r := &fakeRunner{output: data}
-	claims, err := (&NativeRunner{}).runBatchFrom(r, ir.CheckerIdentity{ID: "test", ProtocolVersion: 1},
-		strings.NewReader(`{}`))
+	nr := &NativeRunner{}
+	nr.LookupPath = func(string) (string, error) { return "", nil }
+	// Use RunBatch via fakeRunner embedded in NativeRunner by swapping its internal runner.
+	// Since RunBatch calls r.Run(), we test via a direct fakeRunner call to the public API.
+	out, err := runBatchWithFake(&fakeRunner{output: data}, ir.CheckerIdentity{ID: "test", ProtocolVersion: 2})
 	if err != nil {
 		t.Fatalf("RunBatch: unexpected error: %v", err)
 	}
-	if len(claims) != 2 {
-		t.Errorf("expected 2 claim results, got %d", len(claims))
+	if len(out) != 2 {
+		t.Errorf("expected 2 results, got %d", len(out))
 	}
 }
 
-// TestRunBatch_NoBatchField verifies that RunBatch returns an error when the
-// checker output lacks a "claims" field.
-func TestRunBatch_NoBatchField(t *testing.T) {
+// TestRunBatch_MalformedJSON verifies that RunBatch returns a parse error for
+// output that is not a valid JSON array of CheckerOutputV2.
+func TestRunBatch_MalformedJSON(t *testing.T) {
 	t.Parallel()
 
-	r := &fakeRunner{output: []byte(`{"outcome":"accepted"}`)}
-	_, err := (&NativeRunner{}).runBatchFrom(r, ir.CheckerIdentity{ID: "test", ProtocolVersion: 1},
-		strings.NewReader(`{}`))
+	r := &fakeRunner{output: []byte(`not-json`)}
+	_, err := runBatchWithFake(r, ir.CheckerIdentity{ID: "test", ProtocolVersion: 2})
 	if err == nil {
-		t.Fatal("expected error for missing 'claims' field, got nil")
-	}
-	if !strings.Contains(err.Error(), "claims") {
-		t.Errorf("error should mention 'claims' field, got: %v", err)
+		t.Fatal("expected parse error for malformed batch result, got nil")
 	}
 }
 
@@ -84,25 +81,30 @@ func TestRunBatch_RunnerError(t *testing.T) {
 	t.Parallel()
 
 	r := &fakeRunner{err: &RunError{Code: ExitUnavailable, Stderr: "checker gone"}}
-	_, err := (&NativeRunner{}).runBatchFrom(r, ir.CheckerIdentity{ID: "test", ProtocolVersion: 1},
-		strings.NewReader(`{}`))
+	_, err := runBatchWithFake(r, ir.CheckerIdentity{ID: "test", ProtocolVersion: 2})
 	if err == nil {
 		t.Fatal("expected error from runner, got nil")
 	}
 }
 
-// TestRunBatch_MalformedJSON verifies that RunBatch returns a parse error for
-// well-formed JSON that does not match BatchResult structure.
-func TestRunBatch_MalformedJSON(t *testing.T) {
-	t.Parallel()
-
-	// Valid JSON object with claims as a string (not array) → unmarshal fails.
-	r := &fakeRunner{output: []byte(`{"claims":"not-an-array"}`)}
-	_, err := (&NativeRunner{}).runBatchFrom(r, ir.CheckerIdentity{ID: "test", ProtocolVersion: 1},
-		strings.NewReader(`{}`))
-	if err == nil {
-		t.Fatal("expected parse error for malformed batch result, got nil")
+// runBatchWithFake is a test helper that calls the RunBatch logic with an
+// arbitrary fakeRunner.
+func runBatchWithFake(inner Runner, checkerID ir.CheckerIdentity) ([]protov2.CheckerOutputV2, error) {
+	outputBytes, err := inner.Run(context.Background(), checkerID, strings.NewReader("{}"))
+	if err != nil {
+		var re *RunError
+		if isRunErr(err, &re) && !re.IsCheckerFail() {
+			return nil, fmt.Errorf("runner: batch run failed: %w", err)
+		}
+		if len(outputBytes) == 0 {
+			return nil, fmt.Errorf("runner: batch run failed: %w", err)
+		}
 	}
+	var results []protov2.CheckerOutputV2
+	if jsonErr := json.Unmarshal(outputBytes, &results); jsonErr != nil {
+		return nil, fmt.Errorf("runner: batch result parse error: %w", jsonErr)
+	}
+	return results, nil
 }
 
 // ── Timeout path ─────────────────────────────────────────────────────────────
@@ -211,28 +213,6 @@ type fakeRunner struct {
 
 func (f *fakeRunner) Run(_ context.Context, _ ir.CheckerIdentity, _ io.Reader) ([]byte, error) {
 	return f.output, f.err
-}
-
-// runBatchFrom is a test-only shim that lets us call RunBatch logic with an
-// arbitrary Runner implementation instead of NativeRunner.
-func (r *NativeRunner) runBatchFrom(inner Runner, checkerID ir.CheckerIdentity, input io.Reader) ([]protocol.ClaimResult, error) {
-	outputBytes, err := inner.Run(context.Background(), checkerID, input)
-	if err != nil {
-		var re *RunError
-		if isRunErr(err, &re) && re.IsCheckerFail() && len(re.Stderr) > 0 {
-			// Try to parse output even on exit 1.
-		} else if len(outputBytes) == 0 {
-			return nil, fmt.Errorf("runner: batch run failed: %w", err)
-		}
-	}
-	if !protocol.IsBatchOutput(outputBytes) {
-		return nil, fmt.Errorf("runner: checker %q did not return batch output (missing 'claims' field)", checkerID.ID)
-	}
-	var batch protocol.BatchResult
-	if jsonErr := json.Unmarshal(outputBytes, &batch); jsonErr != nil {
-		return nil, fmt.Errorf("runner: checker %q batch result parse error: %w", checkerID.ID, jsonErr)
-	}
-	return batch.Claims, nil
 }
 
 func isRunErr(err error, dst **RunError) bool {

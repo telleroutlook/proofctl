@@ -5,7 +5,7 @@
   "evidence": [],
   "checker": {
     "id": "ai-reviewer-v1",
-    "protocol_version": 1,
+    "protocol_version": 2,
     "checker_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "schema_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "runtime": {"kind": "native"},
