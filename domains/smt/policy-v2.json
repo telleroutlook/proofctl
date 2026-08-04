@@ -1,0 +1,9 @@
+{
+  "version": "2",
+  "target": "thm-smt-verified",
+  "allowed_assurances": ["deterministic-cap", "formal-kernel", "independent-review"],
+  "forbidden_assurances": ["ai-review", "assumption", "shadow-review"],
+  "forbidden_runtimes": ["shadow"],
+  "required_claims": ["def-smt-formula", "thm-smt-verified"],
+  "required_metadata_keys": ["smt_checker_version"]
+}

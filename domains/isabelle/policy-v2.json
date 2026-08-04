@@ -1,0 +1,9 @@
+{
+  "version": "2",
+  "target": "thm-isabelle-main",
+  "allowed_assurances": ["formal-kernel", "independent-review"],
+  "forbidden_assurances": ["ai-review", "assumption", "shadow-review"],
+  "forbidden_runtimes": ["shadow"],
+  "required_claims": ["thm-isabelle-main"],
+  "required_metadata_keys": ["isabelle_version", "afp_commit"]
+}

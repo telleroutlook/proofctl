@@ -1,0 +1,9 @@
+{
+  "version": "2",
+  "target": "thm-lean-main",
+  "allowed_assurances": ["formal-kernel", "independent-review"],
+  "forbidden_assurances": ["ai-review", "assumption", "shadow-review"],
+  "forbidden_runtimes": ["shadow"],
+  "required_claims": ["thm-lean-main"],
+  "required_metadata_keys": ["lean_version", "mathlib_commit"]
+}

@@ -1,0 +1,31 @@
+{
+  "contract_version": "2",
+  "claim_id": "thm-coq-main",
+  "statement_digest": "sha256:2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb",
+  "dependencies": [],
+  "evidence": {
+    "mode": "none",
+    "required": []
+  },
+  "checker": {
+    "protocol": "proofctl-checker/v2",
+    "checker_digest": "sha256:cc110000cc110000cc110000cc110000cc110000cc110000cc110000cc110000",
+    "schema_digest": "sha256:dd110000dd110000dd110000dd110000dd110000dd110000dd110000dd110000"
+  },
+  "runtime": {
+    "class": "native-dev",
+    "network": "none"
+  },
+  "obligations": [
+    "coq.coqchk-succeeds",
+    "coq.theorem-vo-valid"
+  ],
+  "assurance": {
+    "required": ["formal-kernel"]
+  },
+  "replay": {
+    "semantic": "required",
+    "byte_exact": "not_required"
+  },
+  "independence": {}
+}

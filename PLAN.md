@@ -301,26 +301,17 @@ T23h (mini demo)   ──→ 中期，显著降低上手门槛
 
 ---
 
-## Milestone 8.5 — 预编译二进制发布（GitHub Releases）
+## Milestone 8.5 — 预编译二进制发布（GitHub Releases）✅
 
 **背景：** weil-lower-bound 等仓库需要在 CI 中使用固定版本的 proofctl，
 但目前只能 `go install`（需要 Go 环境）。GitHub Releases 附带预编译二进制
 可让任何环境通过 `curl` 直接获取，无需安装 Go。
 
-### 目标
+### 完成产出
 
-- 打 tag（`v*`）时，CI 自动 cross-compile 以下目标并上传到 GitHub Releases：
-  - `proofctl-linux-amd64`
-  - `proofctl-linux-arm64`
-  - `proofctl-darwin-arm64`
-  - `proofctl-windows-amd64.exe`
-- 下游仓库可以固定版本：`curl -L https://github.com/telleroutlook/proofctl/releases/download/v0.1.0/proofctl-linux-amd64 -o proofctl`
-
-### 实现
-
-- `.github/workflows/release.yml`：监听 `push tags v*`，矩阵构建 + 上传 assets
-- 无需 goreleaser，用标准 `go build -ldflags "-X main.version=$TAG"` 即可
-- `main.go` 加 `--version` flag，打印版本号（来自构建时注入的 ldflags）
+- `.github/workflows/release.yml`：矩阵构建 proofctl + proofverify 四个目标，上传到 GitHub Releases
+- 发布物：`proofctl-{linux-amd64,linux-arm64,darwin-arm64,windows-amd64.exe}` +
+  `proofverify-{linux-amd64,linux-arm64,darwin-arm64,windows-amd64.exe}`
 
 ---
 
@@ -371,7 +362,7 @@ T23 (doctor) ──→ 独立，成本低，立即提升可上手性
 
 ---
 
-## Milestone 10 — Checker 依赖完整性覆盖
+## Milestone 10 — Checker 依赖完整性覆盖 ✅
 
 **背景：** `proofctl pin checker` 只哈希了 checker 脚本本身（如 `bridge.py`），
 但未覆盖脚本的外部依赖（Python 包、数值库等）。若 `numpy` 或 `scipy` 版本变化导致
@@ -512,7 +503,7 @@ T28 (C05 条件)  ──→ 依赖 T27（在 verify 正确后才能做 release �
 
 ---
 
-## Milestone 12 — Lean 4 域完整实现
+## Milestone 12 — Lean 4 域完整实现 ✅
 
 **背景：** Lean 4 是目前数学形式化最活跃的社区（Mathlib4 已有 10 万+ 定理）。
 若证明的某些步骤最终需要 Lean/Mathlib 形式化，`adapters/lean/adapter.go` 目前是空 stub，
@@ -574,7 +565,7 @@ T32 (policy + 集成) ──→ 依赖 T30 + T31
 
 ---
 
-## Milestone 13 — 批量验证协议（Batch Backfill Protocol）
+## Milestone 13 — 批量验证协议（Batch Backfill Protocol）✅
 
 **背景：** 当前 checker 协议假设"每个 claim 单独调用一次 checker"。但 lean4checker、coqchk、
 Isabelle 等形式化验证工具天然是"一次性检查整个编译环境"的模式——没有"只检查第 3 个定理"
@@ -639,7 +630,7 @@ T38 (BatchGroup 字段)  ──→ 依赖 T36，可与 T37 并行
 
 ---
 
-## Milestone 14 — 工具链身份摘要（Toolchain Identity）
+## Milestone 14 — 工具链身份摘要（Toolchain Identity）✅
 
 **背景：** `CheckerIdentity` 目前只锁定 checker 二进制/脚本本身的 digest，以及（M10 之后）
 依赖 lockfile 的 digest。但 Lean/Coq 的可信度还依赖"哪个 Lean 版本 + 哪个 mathlib commit"——
@@ -686,7 +677,7 @@ T40 (status 展示)     ──→ 依赖 T39
 
 ---
 
-## Milestone 15 — Metamath 域（首个 formal-kernel 参考实现）
+## Milestone 15 — Metamath 域（首个 formal-kernel 参考实现）✅
 
 **背景：** 按形式化验证域的适配难度排序，Metamath 是最低的起点：
 - 验证器本身只有几百行 C 代码，无大型工具链依赖
@@ -729,7 +720,7 @@ T43 (脚手架)    ──→ 依赖 T41，可与 T42 并行
 
 ---
 
-## Milestone 16 — 跨域声明消费（Cross-domain Claim Consumption）
+## Milestone 16 — 跨域声明消费（Cross-domain Claim Consumption）✅
 
 **背景：** 这是异构 DAG 的核心架构问题，也是最终证明黎曼猜想必须解决的设计挑战：
 
@@ -799,7 +790,7 @@ T46 (CrossDomainDeps 字段)  ──→ 依赖 T44，可与 T45 并行
 
 ---
 
-## Milestone 17 — Coq/Rocq 域
+## Milestone 17 — Coq/Rocq 域 ✅
 
 **背景：** `coqchk` 是专为"脱离主系统独立复核 `.vo` 编译产物"设计的工具，历史悠久，
 工具链比 Lean 更成熟稳定。在 RH 证明中负责连接"抽象实数"与"机器区间算术"的桥梁：
@@ -814,7 +805,7 @@ T46 (CrossDomainDeps 字段)  ──→ 依赖 T44，可与 T45 并行
 
 ---
 
-## Milestone 18 — SMT/Alethe 域
+## Milestone 18 — SMT/Alethe 域 ✅
 
 **背景：** 与已完成的 LRAT 是近亲，复用"独立小型验证器"模式，边际成本最低。
 Alethe（cvc5 输出格式）和 DRAT（SAT solver 通用格式）都有独立验证器（`verit-checker`、
@@ -828,7 +819,7 @@ Alethe（cvc5 输出格式）和 DRAT（SAT solver 通用格式）都有独立�
 
 ---
 
-## Milestone 19 — Isabelle/HOL 域
+## Milestone 19 — Isabelle/HOL 域 ✅
 
 **背景：** 在处理黎曼 ξ 函数的解析延拓、围道积分、Phragmén-Lindelöf 原理等
 复变函数论时，Isabelle/HOL 拥有目前最完备的复分析库。

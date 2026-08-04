@@ -1,0 +1,9 @@
+{
+  "version": "2",
+  "target": "thm-coq-main",
+  "allowed_assurances": ["formal-kernel", "independent-review"],
+  "forbidden_assurances": ["ai-review", "assumption", "shadow-review"],
+  "forbidden_runtimes": ["shadow"],
+  "required_claims": ["thm-coq-main"],
+  "required_metadata_keys": ["coq_version"]
+}

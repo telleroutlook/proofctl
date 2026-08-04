@@ -53,7 +53,7 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Build
+      - name: Build proofctl
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -67,7 +67,23 @@ jobs:
             ./cmd/proofctl
           echo "Built ${OUTPUT}"
 
+      - name: Build proofverify
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          OUTPUT="proofverify-${{ matrix.suffix }}${{ matrix.ext }}"
+          go build -trimpath \
+            -ldflags "-X main.version=${VERSION}" \
+            -o "${OUTPUT}" \
+            ./cmd/proofverify
+          echo "Built ${OUTPUT}"
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: proofctl-${{ matrix.suffix }}${{ matrix.ext || '' }}
+          files: |
+            proofctl-${{ matrix.suffix }}${{ matrix.ext || '' }}
+            proofverify-${{ matrix.suffix }}${{ matrix.ext || '' }}

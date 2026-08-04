@@ -102,6 +102,23 @@ func (p *Pipeline) Run(
 	// 3. Compute cache key.
 	cacheKey := checker.CacheKey(claim, deps, evidence, checkerID, checkerID.SchemaDigest, policyDigest)
 
+	// 3b. Dependency manifest (lockfile) drift check (M10).
+	// If the checker has a pinned DependencyManifestDigest, verify the current
+	// lockfile on disk still matches. A mismatch means the Python/Go/Cargo
+	// dependencies have changed since the checker was last pinned.
+	if checkerID.Runtime.DependencyManifestDigest != "" &&
+		checkerID.Runtime.DependencyManifestPath != "" {
+		if driftErr := verifyDependencyManifest(
+			p.DAG, checkerID.Runtime.DependencyManifestPath,
+			checkerID.Runtime.DependencyManifestDigest,
+		); driftErr != nil {
+			return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
+				"claim %q: dependency drift detected — checker dependencies have changed since last pin: %v\n"+
+					"  Re-run 'proofctl pin checker --lock %s' to update the pinned digest.",
+				claimID, driftErr, checkerID.Runtime.DependencyManifestPath)
+		}
+	}
+
 	// 4. Check attestation cache.
 	if !p.NoCache {
 		if hit, err := p.loadCachedAttestation(claimID, cacheKey); err == nil && hit != nil {
@@ -545,7 +562,31 @@ func isSigInvalidError(err error) bool {
 }
 
 // verifyEvidenceDigestsOnDisk recomputes the SHA-256 of each evidence file that has
-// a path_hint and compares it against the stored digest. Files that are absent on
+// verifyDependencyManifest checks that the lockfile at manifestPath still
+// matches the pinned digest. Returns non-nil if drift is detected.
+// The dag parameter is unused here but kept for future context enrichment.
+func verifyDependencyManifest(_ interface{}, manifestPath, pinnedDigest string) error {
+	f, err := os.Open(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("lockfile %q not found — checker was pinned with this file", manifestPath)
+		}
+		return fmt.Errorf("open lockfile %q: %w", manifestPath, err)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("hash lockfile %q: %w", manifestPath, err)
+	}
+	_ = f.Close()
+	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	if got != pinnedDigest {
+		return fmt.Errorf("lockfile %q has digest %s, pinned digest is %s",
+			manifestPath, got, pinnedDigest)
+	}
+	return nil
+}
+
 // disk are skipped (CAS verification already covers content-addressable storage).
 // A mismatch means the file was modified after graph.json was last compiled.
 func verifyEvidenceDigestsOnDisk(evidence []ir.EvidenceDescriptor) error {
