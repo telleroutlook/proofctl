@@ -1176,38 +1176,62 @@ T47–T51 互相无依赖，可并行执行
 
 ---
 
-## Milestone 26 — Protocol v2 与执行层（Canvas M2）
+## Milestone 26 — Protocol v2 与执行层（Canvas M2）✅
+
+### 完成产出（commit 9ea5065）
+
+- `pkg/protocol/v2/validate.go`：ValidateOutput() 严格拒绝（INV-06/INV-01），AllObligationsPass()
+- `internal/verify/verify.go`：ProtocolVersion==2 分叉路径，从 ObligationResults 派生 outcome
+- `internal/release/conditions.go`：C09 — ForbiddenRuntimes 触发时拒绝 native runtime（INV-10）
+- `internal/policy/policy.go`：ForbiddenRuntimes 字段
+- `internal/runtime/oci/runner.go`：OCIRunner 骨架，RuntimeClass="isolated-oci"
+- 17 个 validate 测试 + 3 个 C09 测试 + 2 个 OCI 测试
+
+---
+
+## Milestone 27 — 可解释状态与开发反馈（Canvas M3）
 
 ### 目标
 
-- `pkg/protocol/v2/ValidateOutput()`：obligation exact-set 验证（INV-06）
-- `internal/verify/`：当 checkerID.ProtocolVersion==2 时解析 CheckerOutputV2，不读 Outcome/Assurance
-- `internal/runner/`：native 结果写入 `runtime_class: "native-dev"`（INV-10 前置）
-- `internal/release/conditions.go`：C09 条件拒绝 native-dev runtime 进 release（INV-10）
-- `internal/runtime/oci/`：OCIRunner 接口骨架（实际 OCI 调度留 M26+）
+- `proofctl contract lint <contract.json>`：ContractV2 字段完整性检查
+- `proofctl identity @claim`：展示 ClaimIdentity 闭包 inputs 和摘要
+- `proofctl explain-pass @claim`：结构化推导树（状态、依赖、obligations、checker、policy）
+- `proofctl explain-stale @claim`：失效原因分析（哪个字段变化，影响范围）
+- `proofctl impact --changed <digest>`：精确失效节点与原因
+- 删除 `release --fix`（Canvas 明确禁止自动修复 release blocker）
 
 ### 具体任务
 
-**T-M26-1：ValidateOutput（INV-06 执行层）**
-- `pkg/protocol/v2/validate.go`：`ValidateOutput(out CheckerOutputV2, expectedIDs []string) error`
-- 检查：protocol_version=2、claim_id 回显、obligation IDs 精确匹配（无多余、无缺失）、verdict 仅 pass/fail
+**T-M27-1：ContractV2 lint（`internal/kernel/contract/lint.go`）**
+- `LintContract(c ContractV2) []LintError`
+- 检查：contract_version=="2"、claim_id 非空、statement_digest 非空、
+  obligations 非空且 ID 唯一、checker 所有 digest 非空非零、
+  runtime.class 与 assurance 相容、evidence mode 合法
 
-**T-M26-2：verify 层 v2 output 分叉**
-- `internal/verify/verify.go`：checkerID.ProtocolVersion==2 时走 v2 解析路径
-- 从 ObligationResults 派生 outcome，不读 Outcome/Assurance（INV-01 执行）
+**T-M27-2：`proofctl contract lint <file>`**
+- 解析 JSON → LintContract → 输出所有错误
+- 支持 `--json` 模式
 
-**T-M26-3：native 标记 + C09 release 条件（INV-10）**
-- `internal/runner/runner.go`：NativeRunner 在返回结果附带 `RuntimeClass: "native-dev"`
-- `internal/release/conditions.go`：C09 — release 闭包中存在 native-dev 则阻断
+**T-M27-3：`proofctl identity @claim`**
+- 从 `.proofctl/graph.json` + 当前 checkers 构建 ClaimIdentityInputs
+- 调用 `internal/kernel/identity.Compute()`
+- 输出：digest、各字段当前值
 
-**T-M26-4：OCI runner 接口骨架**
-- `internal/runtime/oci/runner.go`：`OCIRunner` 实现 `runner.Runner`，当前返回 ErrNotImplemented
+**T-M27-4：`explain-pass` / `explain-stale` 增强**
+- 在现有 `proofctl explain` 基础上：
+  - `explain-pass`：输出完整推导路径（obligations 逐项、deps 状态、assurance）
+  - `explain-stale`：输出哪个 identity 字段发生变化
+
+**T-M27-5：删除 `release --fix`**
+- 移除 `cmd_release.go` 中 `--fix` flag 和相关逻辑
+- 移除 `--fix` 相关文档和测试
 
 ### 出口闸门
 
-- v2 output 含错误 obligation ID 被 ValidateOutput 拒绝（unit test）
-- native runtime 触发 C09 阻断 release（unit test）
-- `go test ./... staticcheck golangci-lint` 全部通过
+- `contract lint` 对缺字段的 ContractV2 报告正确错误
+- `identity @claim` 输出正确 sha256 digest
+- `release --fix` flag 不再存在（`--help` 不显示）
+- `go test ./... staticcheck golangci-lint` 通过
 
 ---
 

@@ -107,6 +107,10 @@ func main() {
 		cmdKey(subargs, *jsonFlag)
 	case "export":
 		cmdExport(subargs, *jsonFlag)
+	case "contract":
+		cmdContract(subargs, *jsonFlag)
+	case "identity":
+		cmdIdentity(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -136,11 +140,13 @@ Subcommands:
   pin       Pin a checker binary digest and command (pin checker --cmd ...)
   env       Manage checker runtime environment (verify|snapshot|show)
   replay    Cold-start generator+checker replay (--batch, --skip-if-accepted)
-  release   Run the release gate (--dry-run, --fix)
+  release   Run the release gate (--dry-run)
   snapshot  Write a point-in-time snapshot of claims + statuses (--diff)
   doctor    Check that the proofctl environment is ready (PATH, project, checker, CAS)
   key       Manage signing keys (generate|list)
   export    Export an accepted claim to a cross-domain format (--format lean)
+  contract  Verify a Verification Contract v2 file (contract lint <file>)
+  identity  Show the content identity closure of a claim (identity @claim)
   status    Print the current proof graph status (--watch)
 
 Flags:
