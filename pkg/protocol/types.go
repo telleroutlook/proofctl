@@ -40,14 +40,20 @@ type EvidenceRef struct {
 
 // CheckerOutput is written by a checker to stdout as a single JSON object.
 // The checker must exit 0 if and only if the claim is accepted.
+//
+// v1 only: Outcome and Assurance are writable by the checker process.
+// In the v2 protocol (pkg/protocol/v2), these fields do not exist; the checker
+// only returns per-obligation verdicts and proofverify derives the state.
 type CheckerOutput struct {
 	// ProtocolVersion must match CheckerInput.ProtocolVersion.
 	ProtocolVersion int `json:"protocol_version"`
 	// ClaimID must echo CheckerInput.ClaimID.
 	ClaimID string `json:"claim_id"`
 	// Outcome is one of "accepted", "rejected", "disproved", "error", "unavailable".
+	// v1 only; v2 release path must not consume this field — use ObligationResults instead.
 	Outcome string `json:"outcome"`
 	// Assurance is the assurance type the checker is asserting.
+	// v1 only; v2 release path must not consume this field — proofverify derives assurance.
 	Assurance string `json:"assurance"`
 	// Explanation is an optional human-readable explanation of the outcome.
 	Explanation string `json:"explanation,omitempty"`

@@ -138,14 +138,19 @@ func AssuranceLevel(a Assurance) int {
 }
 
 // Attestation records a single local verification decision.
+//
+// v1 only: Outcome and Assurance are writable fields that a checker or human
+// can set directly. The v2 release path (proofverify) must NOT read these fields
+// to determine claim state — it re-derives state from the identity closure via
+// internal/kernel/derive. See TODO M25 in internal/release/gate.go.
 type Attestation struct {
 	ClaimID           string               `json:"claim_id"`
 	StatementDigest   string               `json:"statement_digest"`
 	DependencyDigests []string             `json:"dependency_digests"`
 	Evidence          []EvidenceDescriptor `json:"evidence"`
 	Checker           CheckerIdentity      `json:"checker"`
-	Outcome           string               `json:"outcome"`
-	Assurance         Assurance            `json:"assurance"`
+	Outcome           string               `json:"outcome"`   // v1 only; v2 release path must not consume this field
+	Assurance         Assurance            `json:"assurance"` // v1 only; v2 release path must not consume this field
 	ErrorCode         string               `json:"error_code,omitempty"`
 	BlockReason       string               `json:"block_reason,omitempty"`
 	Resources         ResourceStats        `json:"resources"`

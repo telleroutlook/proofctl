@@ -1140,3 +1140,113 @@ T50 (resources 时间记录修复)        ──→ 独立，改 verify.go + cmd
 T51 (reviewer 字段强制)             ──→ 独立，只改 cmd_attest.go
 T47–T51 互相无依赖，可并行执行
 ```
+
+---
+
+## Milestone 24 — 冻结扩张与 Truth Reset（2026-08-04）
+
+**背景：** 参见《proofctl 可信证明发布内核彻底改造执行 Canvas》（2026-08-04）。
+当前 checker 可直接在输出 JSON 中写 `"outcome": "accepted"` 和 `"assurance": "deterministic-cap"`，状态机信任 attestation 字段而非从不可变输入重新推导。"伪 PASS"在当前数据结构上完全可表示。
+本 Milestone 建立 v2 命名空间骨架、adversarial test skeleton，并在代码中标注 v1/v2 分界。
+
+### 目标产出
+
+- `pkg/protocol/v2/types.go`：v2 wire types（无可写 Outcome/Assurance 字段，只有 ObligationResults）
+- `internal/kernel/` 目录骨架（identity/derive/contract/attestation/policy/bundle 六个包）
+- `cmd/proofverify/main.go` 骨架（不含逻辑，`go build ./...` 通过）
+- `testdata/adversarial/v2_invariants_test.go`：INV-01/06/07 占位 test
+- `internal/ir/types.go`、`internal/release/gate.go` 加 v1-only 注释与 TODO M25
+
+### 出口闸门
+
+- `go build ./...` 通过
+- `go test ./...` 通过（adversarial tests 以 `t.Skip` 标记为 pending）
+- `internal/kernel/` 无 domain/orchestrator/runner 导入（`go list -deps` 验证）
+
+---
+
+## Milestone 25 — 最小可信核（Canvas M1）
+
+**背景：** 实现 `internal/kernel` 核心逻辑，使 `proofverify` 可从 v2 artifacts 推导状态。
+任何可写字段变化都必须被拒绝；release 不读取旧 STATUS 作为事实。
+
+### 目标产出
+
+- `internal/kernel/identity/`：ClaimIdentity closure（sha256 of canonical inputs）
+- `internal/kernel/attestation/`：v2 attestation 验证（self-digest、身份绑定、签名、授权）
+- `internal/kernel/derive/`：v2 状态推导（OPEN/CANDIDATE/LOCALLY_VERIFIED/GLOBALLY_VERIFIED/REPRODUCIBLE/RELEASED/STALE/BLOCKED）与 staleness 传播
+- `internal/kernel/policy/`：v2 policy 解析（KeyAuth，角色-assurance-runtime 三元授权）
+- `cmd/proofverify`：可解析 bundle 并输出 `{"released": true/false, "blockers": [...]}`
+- adversarial tests INV-01/02/03/06/07/09 全部激活并通过
+
+### 出口闸门
+
+- 修改任意关键字段被 proofverify 拒绝（kernel 单元测试覆盖）
+- kernel 覆盖率 ≥95%，关键拒绝路径 100%
+- kernel 包无 subprocess/network/domain imports
+
+---
+
+## Milestone 26 — Protocol v2 与执行层（Canvas M2）
+
+- `pkg/protocol/v2/` 完整 obligation 协议
+- obligation exact-set validation（INV-06）
+- multi-evidence 显式模式 each/joint/matrix/none（INV-07）
+- OCI runner（`internal/runtime/oci/`）+ 只读 CAS materialization
+- pin bridge/checker/schema/lockfile/image 全部字段
+- native 结果强制 development-only 标记（INV-10）
+
+---
+
+## Milestone 27 — 可解释状态与开发反馈（Canvas M3）
+
+- `proofctl contract lint`
+- `proofctl explain-pass @claim`、`proofctl explain-stale @claim`、`proofctl identity @claim`、`proofctl impact --changed <digest>`
+- 结构化 blocker IDs；删除 `release --fix`
+- 状态投影缓存自动重建（release 不读 STATUS 文件）
+
+---
+
+## Milestone 28 — Weil Contract 与 checker 闭环（Canvas M4）
+
+- D1–D18 Verification Contract 矩阵（`domains/weil/contracts/`）
+- Path A primitive-recompute checker（不信任证书自报派生量）
+- Path B 独立实现 + independence manifest（机器可判定独立性）
+- Weil policy v2
+
+---
+
+## Milestone 29 — Mutation、Clean Replay 与正式发布（Canvas M5）
+
+- `proofctl mutate`：平台和 Weil mandatory mutation catalog（kill rate = 100%）
+- byte/semantic replay 分离；cleanroom pipeline（`proofctl replay @root --cleanroom`）
+- signed bundle；独立 proofverify smoke image
+- 两个干净环境完成 semantic replay
+
+---
+
+## Milestone 30 — 第二领域证明通用性（Canvas M6）
+
+- 优先 Metamath，复用同一 kernel/contract/bundle/release 机制
+- core 不新增硬编码；端到端安装真实 checker 的 CI 通过
+
+---
+
+## Canvas 不变量追踪（INV-01–INV-12）
+
+以下 12 个不变量必须有对应代码或测试，不得只是文档约定：
+
+| INV | 描述 | 实现位置 | 状态 |
+|---|---|---|---|
+| INV-01 | 用户输入中不存在可写 PASS/RELEASED 字段 | `pkg/protocol/v2` 结构体无此字段 | M24 ✅ |
+| INV-02 | 结果必须绑定完整身份闭包 | `kernel/attestation.Validate` | M25 |
+| INV-03 | attestation self-digest 加载时重算 | `kernel/attestation.Validate` | M25 |
+| INV-04 | 签名必须由 policy 授权角色密钥验证 | `kernel/policy` + `attestation` | M25 |
+| INV-05 | machine assurance 只能由 runtime 后端产生 | `proofverify` 推导 | M25 |
+| INV-06 | obligation 必须恰好返回一次（exact-set） | `kernel/derive` exact-set check | M25/M26 |
+| INV-07 | required evidence 失败即整体失败 | `kernel/derive` | M25 |
+| INV-08 | dependency 未达到所需状态时下游不得升级 | `kernel/derive` | M25 |
+| INV-09 | identity closure 变化时下游自动失效 | `kernel/derive.PropagateStale` | M25 |
+| INV-10 | native 结果不得进 release | runtime 标记 + proofverify 检查 | M26 |
+| INV-11 | release 必须从原始 v2 文件重新推导 | `proofverify` 实现 | M25 |
+| INV-12 | release bundle 可独立离线复核 | `cmd/proofverify bundle.verify` | M25/M29 |
