@@ -149,6 +149,12 @@ func checkC03AssurancesAllowed(attestations map[string]*ir.Attestation, pol poli
 	var violations []string
 	for id, att := range attestations {
 		assurance := string(att.Assurance)
+		// v2 attestations leave Assurance empty; proofverify derives it from the
+		// runtime+contract. Skip the C03 check for these — applying v1 allowed_assurances
+		// rules to an empty field would produce false positives.
+		if assurance == "" {
+			continue
+		}
 		if forbidden[assurance] {
 			violations = append(violations, fmt.Sprintf("%s uses forbidden assurance %q", id, assurance))
 			continue
