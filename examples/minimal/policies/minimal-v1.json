@@ -1,8 +1,7 @@
 {
   "version": "1",
   "target": "thm-parity-main",
-  "allowed_assurances": ["exact-replay"],
+  "allowed_assurances": ["exact-replay", "reproducible-computation"],
   "forbidden_assurances": ["assumption", "ai-review"],
-  "required_claims": ["lem-even-sum", "lem-odd-plus-even", "thm-parity-main"],
-  "required_metadata_keys": ["checker_name"]
+  "required_claims": ["lem-even-sum", "lem-odd-plus-even", "thm-parity-main"]
 }

@@ -970,4 +970,74 @@ T35 (push/pull)        ──→ 依赖 T34
 - v0.2.6：B18（metadata 覆盖）、B19（self_digest 缺失）、B20（release --fix 误报）、E12（check --evidence）、E13（cas gc 确认）
 - v0.2.7：B22（bridge.py 从 checker stdout 提取 pivot_radius_ratio）
 
-**当前版本：v0.2.7**（2026-08-04）
+**当前版本：v0.2.8**（2026-08-04）
+
+---
+
+## Milestone 22 — 外部评估修复与策略扩展（2026-08-04）
+
+**背景：** 外部评估者实际 clone 并运行了 examples/minimal 端到端流程，发现 4 个可复现的阻断性缺陷，
+并提出 4 项策略扩展建议（P1–P4）。本 Milestone 修复所有缺陷并实现其中 3 项高优先级建议。
+
+### 已修复缺陷（评估报告 P0）
+
+| # | 缺陷 | 修复位置 |
+|---|---|---|
+| F1 | `examples/minimal/graph.json`：`checker_policy` 是内联对象，应为字符串 ID 引用；`checkers[]` 缺少 `protocol_version`、`checker_digest`、`schema_digest`、`runtime`、`network` 字段 | `examples/minimal/graph.json` |
+| F2 | `examples/minimal/checker/check.sh`：输出 `"protocol_version":"1"`（字符串），协议要求 int | `examples/minimal/checker/check.sh` |
+| F3 | `examples/minimal/README.md` 和根 `README.md`：`release` 命令包含不存在的 `--policy` flag；未说明 `replay` 不写入 checker metadata | `examples/minimal/README.md`、`README.md` |
+| F4 | `examples/minimal/policies/minimal-v1.json`：`required_metadata_keys: ["checker_name"]` 在纯 `replay` 流程中永远无法满足，造成 release 必然失败 | `examples/minimal/policies/minimal-v1.json` |
+
+### 已修复工程问题（评估报告 P1/P2）
+
+| # | 问题 | 修复 |
+|---|---|---|
+| E1 | `internal/dag/dag.go` `Validate()` 有废弃的第一次入度计算（死代码，带 `_ = dep` 消错） | 删除死代码，只保留正确实现 |
+| E2 | CI 没有任何端到端 smoke test，schema 演进导致 demo 失效对 CI 不可见 | 新增 `example-smoke-test` job，完整跑通 init→compile→cas import→check→release，断言 `released: true` |
+
+### 新增策略扩展（评估建议 P1–P4）
+
+#### P1：`allowed_metadata_values` — metadata 值白名单（对应评估 Suggestion P1）
+
+**场景：** 策略文件可声明特定 metadata key 的允许值列表。任何 attestation 若含有该 key 且值不在白名单内，
+则 release 失败（C06 条件）。
+
+```json
+"allowed_metadata_values": {
+  "remainder_type_path_b": ["gl_bernstein_ellipse", "legendre_tail", "zero"]
+}
+```
+
+若 checker 输出 `"remainder_type_path_b": "gl_self_convergence"`，C06 触发 → release 阻断。
+
+- `internal/policy/policy.go`：`ReleasePolicy.AllowedMetadataValues map[string][]string`
+- `internal/release/conditions.go`：`CondMetadataValues`（C06）、`checkC06MetadataValues()`
+
+#### P2：`conditional_metadata_keys` — 触发条件 metadata key（对应评估 Suggestion P2）
+
+**场景：** 若任何 attestation 含有触发 key，则至少一条 attestation 必须也含有要求 key。
+用于"存在 kernel_branch 时必须有 drpp_bound_proof"这类约束。
+
+```json
+"conditional_metadata_keys": {
+  "kernel_branch": "drpp_bound_proof"
+}
+```
+
+- `internal/policy/policy.go`：`ReleasePolicy.ConditionalMetadataKeys map[string]string`
+- `internal/release/conditions.go`：`CondConditionalMetadata`（C07）、`checkC07ConditionalMetadata()`
+
+#### P4：`replay_mode` 字段与 `required_replay_mode` 策略（对应评估 Suggestion P4）
+
+**场景：** attestation 明确记录验证深度：`"from_scratch"`（proofctl replay 重新生成并比对摘要）
+vs `"self_consistency"`（proofctl check 对已导入 CAS 的 evidence 运行 checker）。
+策略可以通过 `required_replay_mode: "from_scratch"` 要求高强度验证路径。
+
+- `internal/ir/types.go`：`Attestation.ReplayMode string`（`omitempty`，向后兼容）
+- `cmd/proofctl/cmd_replay.go`：写入 `"from_scratch"`
+- `internal/verify/verify.go`：写入 `"self_consistency"`
+- `internal/policy/policy.go`：`ReleasePolicy.RequiredReplayMode string`
+- `internal/release/conditions.go`：`CondReplayMode`（C08）、`checkC08ReplayMode()`
+
+> 评估 Suggestion P3（leaf_midpoint_check schema 要求）属于 checker 协议扩展，
+> 不在 proofctl 策略层直接支持，留作 checker 实现规范，不在本 Milestone 实现。

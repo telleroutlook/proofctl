@@ -8,15 +8,7 @@
         "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       "depends_on": [],
-      "checker_policy": {
-        "checker_id": "echo-checker-v1",
-        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "allowed_assurances": ["exact-replay"],
-        "runtime": {
-          "type": "native",
-          "cmd": ["sh", "checker/check.sh"]
-        }
-      }
+      "checker_policy": "echo-checker-v1"
     },
     {
       "id": "lem-odd-plus-even",
@@ -26,15 +18,7 @@
         "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       "depends_on": ["lem-even-sum"],
-      "checker_policy": {
-        "checker_id": "echo-checker-v1",
-        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "allowed_assurances": ["exact-replay"],
-        "runtime": {
-          "type": "native",
-          "cmd": ["sh", "checker/check.sh"]
-        }
-      }
+      "checker_policy": "echo-checker-v1"
     },
     {
       "id": "thm-parity-main",
@@ -44,21 +28,20 @@
         "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       },
       "depends_on": ["lem-even-sum", "lem-odd-plus-even"],
-      "checker_policy": {
-        "checker_id": "echo-checker-v1",
-        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "allowed_assurances": ["exact-replay"],
-        "runtime": {
-          "type": "native",
-          "cmd": ["sh", "checker/check.sh"]
-        }
-      }
+      "checker_policy": "echo-checker-v1"
     }
   ],
   "checkers": [
     {
       "id": "echo-checker-v1",
-      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      "protocol_version": 1,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "schema_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {
+        "kind": "native",
+        "cmd": ["sh", "checker/check.sh"]
+      },
+      "network": "none"
     }
   ],
   "evidence": []

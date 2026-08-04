@@ -224,6 +224,7 @@ func (p *Pipeline) Run(
 		Outcome:           outcomeStr,
 		Assurance:         ir.Assurance(assuranceStr),
 		ErrorCode:         errorCode,
+		ReplayMode:        "self_consistency",
 		StartFreshness:    startDate,
 		EndFreshness:      startDate,
 		Resources: ir.ResourceStats{

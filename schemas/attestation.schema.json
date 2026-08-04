@@ -83,6 +83,36 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
       "description": "SHA256 digest of this attestation record, excluding this field."
+    },
+    "cache_key": {
+      "type": "string",
+      "description": "Cache key used to look up this attestation in the checker cache."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Domain-specific key-value metadata from the checker output."
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Tool version map reported by the checker (e.g. lean_version, mathlib_commit)."
+    },
+    "replay_mode": {
+      "type": "string",
+      "enum": ["from_scratch", "self_consistency"],
+      "description": "How the certificate was verified. 'from_scratch': generator re-run and output digest compared (proofctl replay). 'self_consistency': checker ran against already-imported CAS evidence (proofctl check). Absent for attestations written before this field was introduced."
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pubkey_fingerprint", "algorithm", "value"],
+      "description": "Optional Ed25519 signature over the canonical attestation JSON.",
+      "properties": {
+        "pubkey_fingerprint": { "type": "string" },
+        "algorithm": { "type": "string", "enum": ["ed25519"] },
+        "value": { "type": "string", "description": "Base64-encoded signature bytes." }
+      }
     }
   },
   "definitions": {

@@ -63,6 +63,63 @@ jobs:
       - name: Test with race detector
         run: go test -race -timeout 120s ./...
 
+  example-smoke-test:
+    name: Example Smoke Test
+    runs-on: ubuntu-latest
+    # Catches schema drift between graph.json, check.sh, and the engine.
+    needs: build-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build proofctl
+        run: go build -o /usr/local/bin/proofctl ./cmd/proofctl
+
+      - name: Smoke test — examples/minimal end-to-end
+        working-directory: examples/minimal
+        run: |
+          set -euo pipefail
+
+          # 1. init
+          proofctl init --policy policies/minimal-v1.json
+
+          # 2. compile (fills zero statement digests)
+          proofctl compile --fix-digests graph.json
+
+          # 3. Import dummy certificates into CAS
+          echo '{"result":"even+even=even"}' > /tmp/cert-even-sum.json
+          echo '{"result":"odd+even=odd"}'   > /tmp/cert-odd-plus-even.json
+          echo '{"result":"parity ok"}'      > /tmp/cert-parity-main.json
+          proofctl cas import /tmp/cert-even-sum.json
+          proofctl cas import /tmp/cert-odd-plus-even.json
+          proofctl cas import /tmp/cert-parity-main.json
+
+          # 4. Check each claim (checker writes metadata into attestation)
+          export BRIDGE_CHECKER="sh checker/check.sh"
+          proofctl check @lem-even-sum
+          proofctl check @lem-odd-plus-even
+          proofctl check @thm-parity-main
+
+          # 5. Release gate — must pass
+          proofctl release
+
+          # 6. Assert STATUS.json says released: true
+          python3 -c "
+          import json, sys
+          s = json.load(open('.proofctl/STATUS.json'))
+          if not s.get('released'):
+              print('FAIL: released is not true', file=sys.stderr)
+              print(json.dumps(s, indent=2), file=sys.stderr)
+              sys.exit(1)
+          print('OK: released =', s['released'])
+          "
+
   fuzz:
     name: Fuzz
     runs-on: ubuntu-latest

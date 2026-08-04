@@ -19,6 +19,9 @@ const (
 	CondAllAssurancesAllowed     ConditionID = "C03-assurances-allowed"
 	CondReplayConsistency        ConditionID = "C04-replay-consistency"
 	CondAttestationSignatures    ConditionID = "C05-attestation-signatures"
+	CondMetadataValues           ConditionID = "C06-metadata-values"
+	CondConditionalMetadata      ConditionID = "C07-conditional-metadata"
+	CondReplayMode               ConditionID = "C08-replay-mode"
 )
 
 // ConditionResult records whether one release condition passed.
@@ -33,19 +36,31 @@ type ConditionResult struct {
 // Universal conditions: C01 (all claims accepted), C02 (no assumption assurance),
 // C03 (assurances allowed), C04 (replay consistency).
 // Conditional: C05 (attestation signatures) — only when policy.RequireSignedAttestations.
+// Conditional: C06 (metadata values) — only when policy.AllowedMetadataValues is set.
+// Conditional: C07 (conditional metadata keys) — only when policy.ConditionalMetadataKeys is set.
+// Conditional: C08 (replay mode) — only when policy.RequiredReplayMode is set.
 // Domain conditions: one condition per key in pol.RequiredMetadataKeys.
 func EvaluateConditions(
 	graph *dag.DAG,
 	attestations map[string]*ir.Attestation,
 	pol policy.ReleasePolicy,
 ) []ConditionResult {
-	results := make([]ConditionResult, 0, 5+len(pol.RequiredMetadataKeys))
+	results := make([]ConditionResult, 0, 8+len(pol.RequiredMetadataKeys))
 	results = append(results, checkC01GlobalStatus(graph, attestations))
 	results = append(results, checkC02AssumptionFootprint(attestations))
 	results = append(results, checkC03AssurancesAllowed(attestations, pol))
 	results = append(results, checkC04ReplayConsistency(graph, attestations))
 	if pol.RequireSignedAttestations {
 		results = append(results, checkC05AttestationSignatures(attestations))
+	}
+	if len(pol.AllowedMetadataValues) > 0 {
+		results = append(results, checkC06MetadataValues(attestations, pol.AllowedMetadataValues))
+	}
+	if len(pol.ConditionalMetadataKeys) > 0 {
+		results = append(results, checkC07ConditionalMetadata(attestations, pol.ConditionalMetadataKeys))
+	}
+	if pol.RequiredReplayMode != "" {
+		results = append(results, checkC08ReplayMode(attestations, pol.RequiredReplayMode))
 	}
 	for _, key := range pol.RequiredMetadataKeys {
 		results = append(results, checkMetadataKey(attestations, key))
@@ -231,4 +246,108 @@ func checkC05AttestationSignatures(attestations map[string]*ir.Attestation) Cond
 		}
 	}
 	return ConditionResult{ID: CondAttestationSignatures, Passed: true}
+}
+
+// checkC06MetadataValues enforces allowed_metadata_values: for each constrained key,
+// every attestation that carries that key must have a value in the allowed set.
+// Attestations that do not have the key at all are exempt (use required_metadata_keys
+// to require presence separately).
+func checkC06MetadataValues(attestations map[string]*ir.Attestation, allowed map[string][]string) ConditionResult {
+	allowedSet := make(map[string]map[string]bool, len(allowed))
+	for key, vals := range allowed {
+		s := make(map[string]bool, len(vals))
+		for _, v := range vals {
+			s[v] = true
+		}
+		allowedSet[key] = s
+	}
+
+	var violations []string
+	for claimID, att := range attestations {
+		for key, permittedVals := range allowedSet {
+			val, ok := att.Metadata[key]
+			if !ok {
+				continue // key absent — not a violation; use required_metadata_keys for presence
+			}
+			if !permittedVals[val] {
+				var allowed []string
+				for v := range permittedVals {
+					allowed = append(allowed, v)
+				}
+				violations = append(violations,
+					fmt.Sprintf("%s: metadata key %q has value %q, allowed: %s",
+						claimID, key, val, strings.Join(allowed, ", ")))
+			}
+		}
+	}
+	if len(violations) > 0 {
+		return ConditionResult{
+			ID:      CondMetadataValues,
+			Passed:  false,
+			Blocker: "C06: metadata value violations: " + strings.Join(violations, "; "),
+		}
+	}
+	return ConditionResult{ID: CondMetadataValues, Passed: true}
+}
+
+// checkC07ConditionalMetadata enforces conditional_metadata_keys: if any attestation
+// contains the trigger key, at least one attestation must also contain the required key.
+func checkC07ConditionalMetadata(attestations map[string]*ir.Attestation, conditionals map[string]string) ConditionResult {
+	var violations []string
+	for triggerKey, requiredKey := range conditionals {
+		triggered := false
+		for _, att := range attestations {
+			if _, ok := att.Metadata[triggerKey]; ok {
+				triggered = true
+				break
+			}
+		}
+		if !triggered {
+			continue
+		}
+		// Trigger found — check that at least one attestation has the required key.
+		satisfied := false
+		for _, att := range attestations {
+			if v, ok := att.Metadata[requiredKey]; ok && v != "" {
+				satisfied = true
+				break
+			}
+		}
+		if !satisfied {
+			violations = append(violations,
+				fmt.Sprintf("trigger key %q is present but required key %q is absent", triggerKey, requiredKey))
+		}
+	}
+	if len(violations) > 0 {
+		return ConditionResult{
+			ID:      CondConditionalMetadata,
+			Passed:  false,
+			Blocker: "C07: conditional metadata violations: " + strings.Join(violations, "; "),
+		}
+	}
+	return ConditionResult{ID: CondConditionalMetadata, Passed: true}
+}
+
+// checkC08ReplayMode enforces required_replay_mode: every attestation with a non-empty
+// replay_mode must match the required value. Attestations without a replay_mode field
+// (written before this field existed) are exempt.
+func checkC08ReplayMode(attestations map[string]*ir.Attestation, required string) ConditionResult {
+	var violations []string
+	for claimID, att := range attestations {
+		if att.ReplayMode == "" {
+			continue // legacy attestation — exempt
+		}
+		if att.ReplayMode != required {
+			violations = append(violations,
+				fmt.Sprintf("%s: replay_mode=%q, want %q", claimID, att.ReplayMode, required))
+		}
+	}
+	if len(violations) > 0 {
+		return ConditionResult{
+			ID:      CondReplayMode,
+			Passed:  false,
+			Blocker: "C08: replay mode violations: " + strings.Join(violations, "; "),
+		}
+	}
+	return ConditionResult{ID: CondReplayMode, Passed: true}
 }

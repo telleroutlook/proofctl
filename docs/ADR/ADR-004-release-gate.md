@@ -1,6 +1,7 @@
-# ADR-004: Single Release Gate with 13 Explicit Conditions
+# ADR-004: Single Release Gate with Explicit Conditions
 
 **Date:** 2026-08-03  
+**Amended:** 2026-08-04 (M22 — generalised from Weil-specific to universal + domain-conditional)  
 **Status:** Accepted  
 **Deciders:** proofctl core team
 
@@ -22,32 +23,39 @@ several reasons:
 5. **No structured reporting**: "something is blocked" is not actionable;
    "C03 fails because shadow-review is forbidden in the policy" is.
 
-The Weil proof program has 18 known defect categories (D1–D18) and requires
-13 specific conditions to all pass before the main radius theorem can be certified.
-Tracking these manually is error-prone and does not scale.
-
 ---
 
 ## Decision
 
-The ProofGraph Engine uses a **single release gate** with **13 explicit, named conditions**
-(C01–C13). The gate is the only code path that may write `STATUS.json` and set
-`certified_radius` to a non-null value.
+The ProofGraph Engine uses a **single release gate** with **explicit, named conditions**.
+The gate is the only code path that may write `STATUS.json`.
+
+### Universal conditions (always evaluated)
 
 ```
 C01  global-status-accepted       All claims have accepted attestations
 C02  assumption-footprint-empty   No claim uses "assumption" assurance
 C03  assurances-allowed           All assurances are in the allowed list / not forbidden
-C04  cap-format-v2-frozen         CAP format version 2 is recorded in attestation metadata
-C05  digests-fresh                All attestations record freshness timestamps
-C06  path-keys-match              Path A and Path B primitive keys match expected sets
-C07  intervals-intersect          Path A/B intersection is non-empty
-C08  matrix-reconstructed         Reconstruction matrix digest matches certificate
-C09  ldlt-passes                  L-D-L^T factorization checker accepted
-C10  odd-sector-passes            Odd sector checker accepted
-C11  even-sector-passes           Even sector checker accepted
-C12  pivot-radius-ratio           Pivot radius ratio is within bound
-C13  replay-consistency           All attestations have self-digest + freshness fields
+C04  replay-consistency           All checker-policy claims have self_digest + freshness fields
+```
+
+### Policy-activated conditions (evaluated when the policy field is set)
+
+```
+C05  attestation-signatures       All attestations carry a valid Ed25519 signature
+                                  (activated by require_signed_attestations: true)
+C06  metadata-values              No metadata value falls outside the allowed set
+                                  (activated by allowed_metadata_values)
+C07  conditional-metadata         Required key present whenever trigger key is found
+                                  (activated by conditional_metadata_keys)
+C08  replay-mode                  All attestations match the required replay depth
+                                  (activated by required_replay_mode)
+```
+
+### Domain conditions (one per required_metadata_keys entry)
+
+```
+meta:<key>  The key is present and non-empty in at least one attestation
 ```
 
 Architectural constraints:
@@ -59,8 +67,8 @@ Architectural constraints:
 2. **STATUS.json is written atomically** via temp file + fsync + rename. If the
    write fails, no partial STATUS.json is left on disk.
 
-3. **certified_radius stays null** until all 13 conditions pass. There is no
-   mechanism to set it to a non-null value without passing the gate.
+3. **release_target stays empty** until all conditions pass. There is no
+   mechanism to set it to a non-empty value without passing the gate.
 
 4. **Conditions produce structured results** (`ConditionResult{ID, Passed, Blocker}`).
    The CLI prints a condition table showing which conditions passed and failed,
@@ -70,20 +78,16 @@ Architectural constraints:
 
 ## Consequences
 
-- No date pressure or external authority can cause `certified_radius` to become
-  non-null without all 13 conditions passing. The gate is programmatic and
-  cannot be "approved around."
-- The 13 conditions map directly to the Weil acceptance criteria in
-  `docs/WEIL_ACCEPTANCE.md`. Any change to the acceptance criteria requires a
-  corresponding change to the condition set and this ADR.
+- No date pressure or external authority can cause `release_target` to become
+  non-empty without all active conditions passing.
 - `DryRun` and `Release` using the same check function means that a passing
   `DryRun` guarantees a passing `Release` (modulo STATUS.json write failure).
-  There are no hidden relaxations in the dry-run path.
-- A partial release (where some conditions pass and others do not) is impossible:
-  `certified_radius` is either null or the full target claim ID.
-- The structured condition results (C01–C13) are included in both the human CLI
-  output and the JSON output of `proofctl release`, enabling automated monitoring
-  and dashboard display of proof progress.
-- Adding a new condition requires adding it to the `EvaluateConditions` function,
-  the `ConditionID` constants, and this ADR. Removing a condition requires
-  explicit justification and an ADR amendment.
+- A partial release is impossible: `released` is either `false` or `true`.
+- The structured condition results are included in both the human CLI output and
+  the JSON output of `proofctl release`, enabling automated monitoring.
+- Adding a new universal condition requires amending `EvaluateConditions`,
+  adding a `ConditionID` constant, adding tests, and amending this ADR.
+- Policy-activated conditions (C05–C08) are opt-in and backward-compatible:
+  existing policy files without the activating field are unaffected.
+- Domain conditions (`meta:<key>`) are data-driven from `required_metadata_keys`
+  in the policy JSON — no code changes required for new domains.

@@ -18,8 +18,12 @@ cd examples/minimal
 proofctl init --policy policies/minimal-v1.json
 proofctl compile --fix-digests graph.json
 proofctl status          # all open
-# ... replay each claim (see examples/minimal/README.md for full commands)
-proofctl release --policy policies/minimal-v1.json
+# Import a dummy certificate into CAS and run the checker against it:
+echo '{"result":"parity ok"}' > /tmp/cert.json
+BRIDGE_CHECKER="sh checker/check.sh" \
+proofctl cas import /tmp/cert.json
+# ... check each claim (see examples/minimal/README.md for full commands)
+proofctl release
 cat .proofctl/STATUS.json  # "released": true
 ```
 
@@ -126,12 +130,25 @@ A policy file controls what `proofctl release` requires:
   "allowed_assurances": ["deterministic-cap", "formal-kernel", ...],
   "forbidden_assurances": ["ai-review", "assumption", "shadow-review"],
   "required_claims": ["lemma-a", "lemma-b", "thm-my-main-theorem"],
-  "required_metadata_keys": ["cap_format_version", "ldlt_passes", ...]
+  "required_metadata_keys": ["cap_format_version", "ldlt_passes", ...],
+  "allowed_metadata_values": {
+    "remainder_type": ["gl_bernstein_ellipse", "legendre_tail", "zero"]
+  },
+  "conditional_metadata_keys": {
+    "kernel_branch": "drpp_bound_proof"
+  },
+  "required_replay_mode": "from_scratch",
+  "require_signed_attestations": false
 }
 ```
 
-`required_metadata_keys` are domain-specific keys that at least one checker attestation
-must provide. The `cap` domain uses 9 keys populated by `adapters/cap/bridge.py`.
+| Field | Description |
+|---|---|
+| `required_metadata_keys` | Keys that must appear (non-empty) in at least one attestation |
+| `allowed_metadata_values` | Permitted values per key — any other value blocks release (C06) |
+| `conditional_metadata_keys` | If trigger key is present in any attestation, required key must also be present (C07) |
+| `required_replay_mode` | Require `"from_scratch"` or `"self_consistency"` across all attestations (C08) |
+| `require_signed_attestations` | All attestations must carry an Ed25519 signature (C05) |
 
 ## Release Gate Conditions
 
@@ -143,6 +160,10 @@ Every `proofctl release` evaluates:
 | `C02-assumption-footprint-empty` | No `assumption` assurance | Universal |
 | `C03-assurances-allowed` | All assurances pass policy | Universal |
 | `C04-replay-consistency` | All attestations have freshness/digest | Universal |
+| `C05-attestation-signatures` | All attestations signed (when `require_signed_attestations`) | Conditional |
+| `C06-metadata-values` | No metadata value outside allowed set (when `allowed_metadata_values`) | Conditional |
+| `C07-conditional-metadata` | Required key present when trigger key found (when `conditional_metadata_keys`) | Conditional |
+| `C08-replay-mode` | All attestations match required replay mode (when `required_replay_mode`) | Conditional |
 | `meta:<key>` × N | Each `required_metadata_keys` entry present | Domain-specific |
 
 ## Cold-Start Replay

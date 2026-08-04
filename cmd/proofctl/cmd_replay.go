@@ -313,6 +313,7 @@ func cmdReplay(args []string, useJSON bool) {
 			ClaimID:        *claimIDFlag,
 			Outcome:        string(ir.StatusAccepted),
 			Assurance:      assurance,
+			ReplayMode:     "from_scratch",
 			StartFreshness: replayDate,
 			EndFreshness:   replayDate,
 			Metadata: map[string]string{
@@ -935,6 +936,7 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 				ClaimID:        claimID,
 				Outcome:        string(ir.StatusAccepted),
 				Assurance:      assurance,
+				ReplayMode:     "from_scratch",
 				StartFreshness: replayDate,
 				EndFreshness:   replayDate,
 				Metadata: map[string]string{

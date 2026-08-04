@@ -61,22 +61,10 @@ func (d *DAG) Validate() error {
 		}
 	}
 
-	// Kahn's algorithm: compute in-degrees.
+	// Kahn's algorithm: in-degree = number of direct dependencies.
 	inDegree := make(map[string]int, len(d.claims))
-	for id := range d.claims {
-		inDegree[id] = 0
-	}
-	for _, c := range d.claims {
-		for _, dep := range c.DependsOn {
-			// dep must be processed before c, so c has an in-edge from dep.
-			inDegree[c.ID]++
-			_ = dep
-		}
-	}
-
-	// Recompute properly: for each claim, count how many deps it has.
-	for id := range d.claims {
-		inDegree[id] = len(d.claims[id].DependsOn)
+	for id, c := range d.claims {
+		inDegree[id] = len(c.DependsOn)
 	}
 
 	queue := make([]string, 0, len(d.claims))

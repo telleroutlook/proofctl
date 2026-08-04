@@ -153,7 +153,14 @@ type Attestation struct {
 	// Toolchain records the checker's tool version map, populated from
 	// CheckerOutput.Toolchain. Stored for auditing and status --verbose display.
 	Toolchain map[string]string `json:"toolchain,omitempty"`
-	Signature *AttestationSig   `json:"signature,omitempty"`
+	// ReplayMode records how the certificate was verified:
+	// "from_scratch" means the generator was re-run from scratch and the output
+	// digest was compared against the pinned evidence (set by proofctl replay).
+	// "self_consistency" means the checker ran against already-imported CAS evidence
+	// without re-running the generator (set by proofctl check).
+	// Empty for attestations written before this field was introduced.
+	ReplayMode string          `json:"replay_mode,omitempty"`
+	Signature  *AttestationSig `json:"signature,omitempty"`
 }
 
 // AttestationSig is the optional Ed25519 signature embedded in an attestation.

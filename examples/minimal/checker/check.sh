@@ -8,5 +8,5 @@
 
 CERT="${1:-}"
 
-printf '{"protocol_version":"1","claim_id":"","outcome":"accepted","assurance":"exact-replay","metadata":{"checker_name":"echo-checker-v1","cert_path":"%s"}}\n' "$CERT"
+printf '{"protocol_version":1,"claim_id":"","outcome":"accepted","assurance":"exact-replay","metadata":{"checker_name":"echo-checker-v1","cert_path":"%s"}}\n' "$CERT"
 exit 0

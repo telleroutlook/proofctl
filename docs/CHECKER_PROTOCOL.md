@@ -140,7 +140,11 @@ Fields:
 
 ## Protocol Versioning
 
-The protocol version is a positive integer. The current version is `1`.
+The protocol version is a positive **integer**. The current version is `1`.
+
+> **Important:** `protocol_version` must be an integer literal (e.g. `1`), never
+> a string (e.g. `"1"`). Checkers that output a string will receive a JSON decode
+> error from the engine.
 
 - A checker must reject any `CheckerInput` whose `protocol_version` differs from
   the version it implements, by exiting 3 with `code: "UNSUPPORTED_PROTOCOL_VERSION"`.
@@ -148,3 +152,25 @@ The protocol version is a positive integer. The current version is `1`.
   `protocol_version` differs from the input's.
 - Protocol version increments are breaking changes. Checkers declaring
   `protocol_version: 1` in their `CheckerIdentity` will never receive a v2 input.
+
+## Replay Mode
+
+proofctl records how a certificate was verified in the `replay_mode` field of each
+attestation:
+
+| Value | Set by | Meaning |
+|---|---|---|
+| `"from_scratch"` | `proofctl replay` | Generator re-run; output digest compared against pinned evidence |
+| `"self_consistency"` | `proofctl check` | Checker ran against already-imported CAS evidence; no generator re-run |
+
+Attestations written before this field was introduced have an empty `replay_mode`
+and are treated as legacy (exempt from `required_replay_mode` policy enforcement).
+
+Policies can require a specific replay depth:
+
+```json
+"required_replay_mode": "from_scratch"
+```
+
+This activates release condition C08. Any attestation with a non-empty `replay_mode`
+that does not match will block release.

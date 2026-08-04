@@ -254,3 +254,234 @@ func assertFailed(t *testing.T, r release.ConditionResult, wantID release.Condit
 		t.Errorf("%s: expected non-empty blocker message for failed condition", label)
 	}
 }
+
+// TestC06AllowedMetadataValues_Pass verifies that C06 passes when all metadata values
+// are in the allowed set.
+func TestC06AllowedMetadataValues_Pass(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:        "c1",
+			Outcome:        "accepted",
+			Assurance:      ir.AssuranceFormalKernel,
+			SelfDigest:     "sha256:abc",
+			StartFreshness: "2026-08-04",
+			EndFreshness:   "2026-08-04",
+			Metadata:       map[string]string{"remainder_type": "gl_bernstein_ellipse"},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:           "1",
+		AllowedAssurances: []string{"formal-kernel"},
+		AllowedMetadataValues: map[string][]string{
+			"remainder_type": {"gl_bernstein_ellipse", "legendre_tail", "zero"},
+		},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	// 4 universal + 1 C06
+	if len(results) != 5 {
+		t.Fatalf("expected 5 results, got %d", len(results))
+	}
+	c06 := results[4]
+	if c06.ID != release.CondMetadataValues {
+		t.Fatalf("results[4].ID = %q, want %q", c06.ID, release.CondMetadataValues)
+	}
+	if !c06.Passed {
+		t.Errorf("C06 should pass, got blocker: %s", c06.Blocker)
+	}
+}
+
+// TestC06AllowedMetadataValues_Fail verifies that C06 fails when a metadata value
+// is not in the allowed set.
+func TestC06AllowedMetadataValues_Fail(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:    "c1",
+			Outcome:    "accepted",
+			Assurance:  ir.AssuranceFormalKernel,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-04", EndFreshness: "2026-08-04",
+			Metadata: map[string]string{"remainder_type": "gl_self_convergence"},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:           "1",
+		AllowedAssurances: []string{"formal-kernel"},
+		AllowedMetadataValues: map[string][]string{
+			"remainder_type": {"gl_bernstein_ellipse", "legendre_tail", "zero"},
+		},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c06 := results[4]
+	if c06.Passed {
+		t.Error("C06 should fail when value is not in allowed set")
+	}
+	if !strings.Contains(c06.Blocker, "gl_self_convergence") {
+		t.Errorf("blocker should mention the bad value, got: %s", c06.Blocker)
+	}
+}
+
+// TestC07ConditionalMetadata_NotTriggered verifies that C07 passes when the trigger
+// key is absent (condition not activated).
+func TestC07ConditionalMetadata_NotTriggered(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:    "c1",
+			Outcome:    "accepted",
+			Assurance:  ir.AssuranceFormalKernel,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-04", EndFreshness: "2026-08-04",
+			Metadata: map[string]string{"other_key": "val"},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:                 "1",
+		AllowedAssurances:       []string{"formal-kernel"},
+		ConditionalMetadataKeys: map[string]string{"kernel_branch": "drpp_bound_proof"},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c07 := results[4]
+	if c07.ID != release.CondConditionalMetadata {
+		t.Fatalf("results[4].ID = %q, want %q", c07.ID, release.CondConditionalMetadata)
+	}
+	if !c07.Passed {
+		t.Errorf("C07 should pass when trigger is absent, got: %s", c07.Blocker)
+	}
+}
+
+// TestC07ConditionalMetadata_Triggered_Missing verifies that C07 fails when the trigger
+// key is present but the required key is absent.
+func TestC07ConditionalMetadata_Triggered_Missing(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:    "c1",
+			Outcome:    "accepted",
+			Assurance:  ir.AssuranceFormalKernel,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-04", EndFreshness: "2026-08-04",
+			Metadata: map[string]string{"kernel_branch": "odd_sector"},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:                 "1",
+		AllowedAssurances:       []string{"formal-kernel"},
+		ConditionalMetadataKeys: map[string]string{"kernel_branch": "drpp_bound_proof"},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c07 := results[4]
+	if c07.Passed {
+		t.Error("C07 should fail when trigger is present but required key is absent")
+	}
+	if !strings.Contains(c07.Blocker, "drpp_bound_proof") {
+		t.Errorf("blocker should mention the missing required key, got: %s", c07.Blocker)
+	}
+}
+
+// TestC07ConditionalMetadata_Triggered_Present verifies that C07 passes when both
+// the trigger key and required key are present.
+func TestC07ConditionalMetadata_Triggered_Present(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:    "c1",
+			Outcome:    "accepted",
+			Assurance:  ir.AssuranceFormalKernel,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-04", EndFreshness: "2026-08-04",
+			Metadata: map[string]string{
+				"kernel_branch":    "odd_sector",
+				"drpp_bound_proof": "certified",
+			},
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:                 "1",
+		AllowedAssurances:       []string{"formal-kernel"},
+		ConditionalMetadataKeys: map[string]string{"kernel_branch": "drpp_bound_proof"},
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c07 := results[4]
+	if !c07.Passed {
+		t.Errorf("C07 should pass when required key is present, got: %s", c07.Blocker)
+	}
+}
+
+// TestC08ReplayMode_Pass verifies that C08 passes when all attestations have the
+// required replay_mode.
+func TestC08ReplayMode_Pass(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:    "c1",
+			Outcome:    "accepted",
+			Assurance:  ir.AssuranceExactReplay,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-04", EndFreshness: "2026-08-04",
+			ReplayMode: "from_scratch",
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:            "1",
+		AllowedAssurances:  []string{"exact-replay"},
+		RequiredReplayMode: "from_scratch",
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c08 := results[4]
+	if c08.ID != release.CondReplayMode {
+		t.Fatalf("results[4].ID = %q, want %q", c08.ID, release.CondReplayMode)
+	}
+	if !c08.Passed {
+		t.Errorf("C08 should pass, got: %s", c08.Blocker)
+	}
+}
+
+// TestC08ReplayMode_Fail verifies that C08 fails when an attestation has the wrong
+// replay_mode.
+func TestC08ReplayMode_Fail(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:    "c1",
+			Outcome:    "accepted",
+			Assurance:  ir.AssuranceExactReplay,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-04", EndFreshness: "2026-08-04",
+			ReplayMode: "self_consistency",
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:            "1",
+		AllowedAssurances:  []string{"exact-replay"},
+		RequiredReplayMode: "from_scratch",
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c08 := results[4]
+	if c08.Passed {
+		t.Error("C08 should fail when replay_mode does not match required value")
+	}
+	if !strings.Contains(c08.Blocker, "self_consistency") {
+		t.Errorf("blocker should mention the actual replay_mode, got: %s", c08.Blocker)
+	}
+}
+
+// TestC08ReplayMode_LegacyExempt verifies that C08 exempts attestations with an
+// empty replay_mode (written before the field was introduced).
+func TestC08ReplayMode_LegacyExempt(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID:    "c1",
+			Outcome:    "accepted",
+			Assurance:  ir.AssuranceExactReplay,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-04", EndFreshness: "2026-08-04",
+			// ReplayMode deliberately empty (legacy attestation)
+		},
+	}
+	pol := policy.ReleasePolicy{
+		Version:            "1",
+		AllowedAssurances:  []string{"exact-replay"},
+		RequiredReplayMode: "from_scratch",
+	}
+	results := release.EvaluateConditions(g, atts, pol)
+	c08 := results[4]
+	if !c08.Passed {
+		t.Errorf("C08 should exempt legacy attestations with empty replay_mode, got: %s", c08.Blocker)
+	}
+}
