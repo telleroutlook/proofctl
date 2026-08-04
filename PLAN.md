@@ -968,9 +968,9 @@ T35 (push/pull)        ──→ 依赖 T34
 - v0.2.4：B12–B15、E6–E11、F9–F15（export、graph filter、replay --dry-run、snapshot --diff）
 - v0.2.5：GitHub Actions release workflow 竞态修复
 - v0.2.6：B18（metadata 覆盖）、B19（self_digest 缺失）、B20（release --fix 误报）、E12（check --evidence）、E13（cas gc 确认）
-- v0.2.7：B22（bridge.py 从 checker stdout 提取 pivot_radius_ratio）
+- v0.2.9：M23 — Bug 1–5 修复（schema_digest pin、绝对路径拒绝、evidence digest 重算、resources 计时、reviewer 强制）
 
-**当前版本：v0.2.8**（2026-08-04）
+**当前版本：v0.2.9**（2026-08-04）
 
 ---
 
