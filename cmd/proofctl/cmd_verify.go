@@ -28,12 +28,20 @@ import (
 //
 //	proofctl verify @<claim-id>
 //	proofctl verify --project [--parallel N]
+//	proofctl verify --signature-only @<claim-id>
+//	proofctl verify --signature-only --project
 func cmdVerify(args []string, useJSON bool) {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	projectFlag := fs.Bool("project", false, "verify all open claims in dependency order")
 	parallelFlag := fs.Int("parallel", 0, "max parallel checkers for --project (0 = number of CPUs)")
+	sigOnlyFlag := fs.Bool("signature-only", false, "verify signature + evidence digests without re-running the checker")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, "verify: "+err.Error())
+	}
+
+	if *sigOnlyFlag {
+		cmdVerifySignatureOnly(fs.Args(), *projectFlag, useJSON)
+		return
 	}
 
 	root, _, g, _ := loadProjectGraph(useJSON)
@@ -403,4 +411,76 @@ func loadSigningKeyIfSet() *signing.Key {
 // loadSigningKeyFromPath loads a private signing key from an explicit path.
 func loadSigningKeyFromPath(path string) (*signing.Key, error) {
 	return signing.LoadPrivate(path)
+}
+
+// cmdVerifySignatureOnly verifies attestation signatures and evidence digests
+// without re-running the checker. For each attestation it checks:
+//  1. self_digest matches sha256(attestation-sans-self_digest)
+//  2. signature is valid against a key in the trust store (if signed)
+//  3. all evidence digests are present in CAS
+func cmdVerifySignatureOnly(positional []string, projectMode bool, useJSON bool) {
+	root, _, g, _ := loadProjectGraph(useJSON)
+
+	casRoot := filepath.Join(root, config.DirName, config.CASDir)
+	store, err := cas.New(casRoot)
+	if err != nil {
+		die(useJSON, errors.CodeInternalError, fmt.Sprintf("cannot open CAS at %s: %v", casRoot, err))
+	}
+
+	trustStore := filepath.Join(root, config.DirName, "keys")
+	pipe := &verify.Pipeline{
+		DAG:        g,
+		CAS:        store,
+		AttestDir:  filepath.Join(root, config.DirName, config.AttestDir),
+		TrustStore: trustStore,
+	}
+
+	type sigResult struct {
+		ClaimID string `json:"claim_id"`
+		OK      bool   `json:"ok"`
+		Error   string `json:"error,omitempty"`
+	}
+
+	var targets []string
+	if projectMode {
+		for _, c := range g.Claims() {
+			targets = append(targets, c.ID)
+		}
+	} else {
+		if len(positional) == 0 {
+			die(useJSON, errors.CodeInvalidInput, "usage: proofctl verify --signature-only @<claim-id> or --project")
+		}
+		arg := positional[0]
+		claimID := strings.TrimPrefix(strings.TrimSuffix(filepath.Base(strings.TrimSuffix(arg, ".json")), ".json"), "@")
+		targets = []string{claimID}
+	}
+
+	var results []sigResult
+	exitCode := 0
+	for _, claimID := range targets {
+		r := sigResult{ClaimID: claimID}
+		if err := pipe.VerifySignatureOnly(claimID); err != nil {
+			r.Error = err.Error()
+			exitCode = 1
+		} else {
+			r.OK = true
+		}
+		if !useJSON {
+			if r.OK {
+				fmt.Printf("OK %s\n", claimID)
+			} else {
+				fmt.Printf("FAIL %s: %s\n", claimID, r.Error)
+			}
+		}
+		results = append(results, r)
+	}
+
+	if useJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(results)
+	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
 }

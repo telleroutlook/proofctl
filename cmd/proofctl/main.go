@@ -115,6 +115,8 @@ func main() {
 		cmdMutate(subargs, *jsonFlag)
 	case "bundle":
 		cmdBundle(subargs, *jsonFlag)
+	case "git-hook":
+		cmdGitHook(subargs, *jsonFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "proofctl: unknown subcommand %q\n", subcmd)
 		usage()
@@ -133,7 +135,7 @@ Subcommands:
   domains   List known domains (domains list)
   compile   Compile a proof source file to ProofGraph IR
   check     Run checker against CAS evidence for a claim (--all | --no-cache | --evidence <digest>)
-  verify    Verify attestation integrity
+  verify    Verify attestation integrity (--signature-only skips re-running the checker)
   attest    Record a manual attestation (--batch, diff, --force, --key)
   explain   Explain the status of a claim
   graph     Print the claim dependency graph (--dot, --mermaid)
@@ -153,6 +155,7 @@ Subcommands:
   identity  Show the content identity closure of a claim (identity @claim)
   mutate    Run the mandatory mutation catalog (kill rate must be 100%)
   bundle    Manage release bundles (bundle create|verify)
+  git-hook  Manage the pre-commit attestation guard (install|uninstall|status)
   status    Print the current proof graph status (--watch)
 
 Flags:

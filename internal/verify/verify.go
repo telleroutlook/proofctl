@@ -497,6 +497,72 @@ func isSigInvalidError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "signature-invalid")
 }
 
+// VerifySignatureOnly loads the stored attestation for claimID and verifies:
+//  1. self_digest matches the recomputed digest
+//  2. signature is valid against a key in TrustStore (if attestation is signed)
+//  3. all evidence digests are present in CAS
+//
+// The checker is not re-run. Returns nil if all checks pass.
+func (p *Pipeline) VerifySignatureOnly(claimID string) error {
+	if err := ir.ValidateClaimID(claimID); err != nil {
+		return fmt.Errorf("verify-sig: %w", err)
+	}
+
+	path := filepath.Join(p.AttestDir, claimID+".json")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no attestation for claim %q", claimID)
+		}
+		return fmt.Errorf("open attestation %q: %w", claimID, err)
+	}
+	att, err := ir.DecodeAttestation(f)
+	_ = f.Close()
+	if err != nil {
+		return fmt.Errorf("decode attestation %q: %w", claimID, err)
+	}
+
+	// 1. self_digest integrity
+	att.SelfDigest = ""
+	recomputed, err := ir.DigestOf(att)
+	if err != nil {
+		return fmt.Errorf("claim %q: recompute self_digest: %w", claimID, err)
+	}
+	// restore and compare — we zeroed before DigestOf so we need the original
+	f2, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("reopen attestation %q: %w", claimID, err)
+	}
+	att2, err := ir.DecodeAttestation(f2)
+	_ = f2.Close()
+	if err != nil {
+		return fmt.Errorf("re-decode attestation %q: %w", claimID, err)
+	}
+	if recomputed != att2.SelfDigest {
+		return fmt.Errorf("claim %q: self_digest mismatch (stored %s, computed %s) — attestation may have been tampered with",
+			claimID, att2.SelfDigest, recomputed)
+	}
+
+	// 2. signature verification
+	if att2.Signature != nil {
+		if err := p.verifyAttestationSig(att2); err != nil {
+			return fmt.Errorf("claim %q: %w", claimID, err)
+		}
+	}
+
+	// 3. evidence present in CAS
+	for _, ev := range att2.Evidence {
+		if ev.Digest == "" {
+			continue
+		}
+		if err := p.CAS.Verify(ev); err != nil {
+			return fmt.Errorf("claim %q: evidence %s missing from CAS: %w", claimID, ev.Digest, err)
+		}
+	}
+
+	return nil
+}
+
 // verifyEvidenceDigestsOnDisk recomputes the SHA-256 of each evidence file that has
 // verifyDependencyManifest checks that the lockfile at manifestPath still
 // matches the pinned digest. Returns non-nil if drift is detected.
