@@ -100,6 +100,9 @@ func Blockers(results []ConditionResult) []string {
 }
 
 // checkC01GlobalStatus checks that every claim in the graph has an accepted attestation.
+// For v2 attestations (ProtocolVersion == 2) acceptance is derived from ObligationResults
+// (all verdicts must be "pass") rather than trusting the writable Outcome field.
+// This closes the bypass where a hand-crafted "outcome":"accepted" could pass C01.
 func checkC01GlobalStatus(graph *dag.DAG, attestations map[string]*ir.Attestation) ConditionResult {
 	var failed []string
 	for _, c := range graph.Claims() {
@@ -108,7 +111,7 @@ func checkC01GlobalStatus(graph *dag.DAG, attestations map[string]*ir.Attestatio
 			failed = append(failed, c.ID)
 			continue
 		}
-		if att.Outcome != string(ir.StatusAccepted) {
+		if !attestationAccepted(att) {
 			failed = append(failed, fmt.Sprintf("%s(outcome=%s)", c.ID, att.Outcome))
 		}
 	}
@@ -120,6 +123,24 @@ func checkC01GlobalStatus(graph *dag.DAG, attestations map[string]*ir.Attestatio
 		}
 	}
 	return ConditionResult{ID: CondGlobalStatusAccepted, Passed: true}
+}
+
+// attestationAccepted returns true if the attestation represents an accepted claim.
+// For v2 attestations it re-derives acceptance from ObligationResults (all "pass"),
+// ignoring the writable Outcome field. For v1 attestations it falls back to Outcome.
+func attestationAccepted(att *ir.Attestation) bool {
+	if att.Checker.ProtocolVersion == 2 {
+		if len(att.ObligationResults) == 0 {
+			return false
+		}
+		for _, r := range att.ObligationResults {
+			if r.Verdict != "pass" {
+				return false
+			}
+		}
+		return true
+	}
+	return att.Outcome == string(ir.StatusAccepted)
 }
 
 // checkC02AssumptionFootprint checks that no attestation has assurance "assumption".

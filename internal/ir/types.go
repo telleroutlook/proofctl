@@ -142,7 +142,8 @@ func AssuranceLevel(a Assurance) int {
 // v1 only: Outcome and Assurance are writable fields that a checker or human
 // can set directly. The v2 release path (proofverify) must NOT read these fields
 // to determine claim state — it re-derives state from the identity closure via
-// internal/kernel/derive. See TODO M25 in internal/release/gate.go.
+// internal/kernel/derive. The v2 release path now reads ObligationResults
+// from the attestation instead of trusting this field (P0 fix, Milestone 37).
 type Attestation struct {
 	ClaimID           string               `json:"claim_id"`
 	StatementDigest   string               `json:"statement_digest"`
@@ -168,8 +169,22 @@ type Attestation struct {
 	// "self_consistency" means the checker ran against already-imported CAS evidence
 	// without re-running the generator (set by proofctl check).
 	// Empty for attestations written before this field was introduced.
-	ReplayMode string          `json:"replay_mode,omitempty"`
-	Signature  *AttestationSig `json:"signature,omitempty"`
+	ReplayMode string `json:"replay_mode,omitempty"`
+	// ObligationResults stores the per-obligation verdicts from the v2 checker output.
+	// Present only for v2 attestations (Checker.ProtocolVersion == 2).
+	// The release gate reads this field instead of the writable Outcome field to
+	// determine acceptance — a hand-crafted "outcome":"accepted" cannot bypass C01.
+	ObligationResults []ObligationResult `json:"obligation_results,omitempty"`
+	Signature         *AttestationSig    `json:"signature,omitempty"`
+}
+
+// ObligationResult mirrors protov2.ObligationResult for storage in ir.Attestation.
+// Kept in ir so the kernel package has no dependency on pkg/protocol.
+type ObligationResult struct {
+	ID            string `json:"id"`
+	Verdict       string `json:"verdict"` // "pass" | "fail"
+	WitnessDigest string `json:"witness_digest,omitempty"`
+	Method        string `json:"method,omitempty"`
 }
 
 // AttestationSig is the optional Ed25519 signature embedded in an attestation.

@@ -391,6 +391,9 @@ func TestGenerality_ReleaseGate(t *testing.T) {
 			StartFreshness: "sha256:start",
 			EndFreshness:   "sha256:end",
 			Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
+			ObligationResults: []ir.ObligationResult{
+				{ID: "ob-1", Verdict: "pass"},
+			},
 			Metadata: map[string]string{
 				"cap_format_version":   "v2",
 				"digests_fresh":        "true",

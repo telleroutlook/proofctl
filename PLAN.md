@@ -962,7 +962,7 @@ T35 (push/pull)        ──→ 依赖 T34
 - v0.2.6：B18（metadata 覆盖）、B19（self_digest 缺失）、B20（release --fix 误报）、E12（check --evidence）、E13（cas gc 确认）
 - v0.2.9：M23 — Bug 1–5 修复（schema_digest pin、绝对路径拒绝、evidence digest 重算、resources 计时、reviewer 强制）
 
-**当前版本：v0.3.0**（2026-08-05）
+**当前版本：v0.3.8**（2026-08-05）
 
 ---
 
@@ -1773,6 +1773,78 @@ native-dev 除 C09 policy 之外没有硬性禁止；多个域缺少 conformance
 | INV-10 | native 结果不得进 release | `internal/release.C09` + `internal/policy.ForbiddenRuntimes` + `testdata/mutation/` C09 fixture | M26/M29 ✅ |
 | INV-11 | release 必须从原始 v2 文件重新推导 | `proofverify bundle.verify` 不读 STATUS 文件 | M25 ✅ |
 | INV-12 | release bundle 可独立离线复核 | `cmd/proofverify bundle.verify` + `proofctl bundle verify` | M25/M29 ✅ |
+
+---
+
+## Milestone 37 — 外部评价报告修复（2026-08-05）✅
+
+**背景：** 第三方评价报告（`proofctl_评价报告.md`）经代码核查确认以下三条问题属实。
+本 Milestone 按优先级修复：P0 是唯一有真实安全影响的项，P1/P2 为文档问题。
+
+---
+
+### P0：C01 信任可写字段（TODO M25，真实安全风险）
+
+**位置：** `internal/release/conditions.go:111`、`internal/release/gate.go:134`
+
+**问题：** `checkC01GlobalStatus` 读取 `att.Outcome`（attestation JSON 中可直接编辑的字段）
+作为放行依据。手工构造含 `"outcome":"accepted"` 的 attestation 文件可绕过 C01 检查，
+进而通过发布门禁。
+
+**修复：** `checkC01GlobalStatus` 改为调用 `kernel/derive.DeriveClaimState`，
+以派生状态代替读取可写字段。派生结果 ≥ `StateGloballyVerified` 才视为已接受。
+
+**具体任务：**
+
+- `internal/release/conditions.go`：`checkC01GlobalStatus` 接受 `DeriveInput`
+  并调用 `derive.DeriveClaimState`；不再读取 `att.Outcome`
+- `internal/release/gate.go`：`check()` 为每个 claim 构造 `DeriveInput`
+  （`CurrentIdentity` via `identity.Compute`、`ObligationSet` from v2 obligation_results、
+  `DepStates` 递归传入）；删除 `// TODO M25` 注释
+- 新增攻击场景回归测试：手工写入 `"outcome":"accepted"` 但无合法 attestation 的
+  情况必须被 C01 阻止（`LEGACY_ATTESTATION_NOT_RELEASABLE` 或等效 blocker）
+
+**出口闸门：**
+- `checkC01GlobalStatus` 中不再有任何 `att.Outcome` 读取
+- 攻击场景测试通过：伪造 Outcome 字段无法绕过 C01
+- `go test ./...`、`staticcheck`、`golangci-lint` 全部通过
+
+---
+
+### P1：SECURITY.md 版本与 CHANGELOG 不同步
+
+**位置：** `SECURITY.md:5`（写死 `v0.2.8`）vs `CHANGELOG.md`（最新 `v0.3.7`）
+
+**修复：**
+
+1. 手工更新 `SECURITY.md` 中的版本号为当前最新 tag
+2. 在 `.github/workflows/ci.yml` 新增 `version-sync` step：从 `CHANGELOG.md`
+   提取最新版本号，与 `SECURITY.md` 中记录的版本号比对，不一致则 CI 失败
+
+**出口闸门：** `SECURITY.md` 版本与 `CHANGELOG.md` 最新 tag 一致；CI version-sync step 通过
+
+---
+
+### P2：README 首屏缺少数学正确性边界声明
+
+**位置：** `README.md` 首段
+
+**问题：** 标题 "Mathematical Proof Certification Platform" 在首屏无说明，
+容易让读者误以为 proofctl 能判断数学是否正确。
+
+**修复：** 在 README 简介段末尾追加一句边界声明：
+> proofctl verifies **process integrity and reproducibility**, not mathematical
+> correctness — that responsibility belongs entirely to the domain checker you integrate.
+
+**出口闸门：** 边界声明出现在 README 首屏可见位置（简介段内）
+
+---
+
+### 执行顺序
+
+```
+P0 → go build + staticcheck + go test → P1（改 SECURITY.md，加 CI step）→ P2
+```
 
 ---
 

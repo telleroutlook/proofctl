@@ -23,9 +23,9 @@ func Compute(graph *dag.DAG, attestations map[string]*ir.Attestation) map[string
 }
 
 func computeOne(id string, graph *dag.DAG, attestations map[string]*ir.Attestation) ir.Status {
-	// If we have a direct attestation, use its outcome.
+	// If we have a direct attestation, derive its status.
 	if att, ok := attestations[id]; ok {
-		return ir.Status(att.Outcome)
+		return deriveStatus(att)
 	}
 
 	// Check transitive dependencies for blocking statuses.
@@ -39,11 +39,29 @@ func computeOne(id string, graph *dag.DAG, attestations map[string]*ir.Attestati
 		if !hasDep {
 			continue
 		}
-		switch ir.Status(depAtt.Outcome) {
+		switch deriveStatus(depAtt) {
 		case ir.StatusDisproved, ir.StatusRejected, ir.StatusError:
 			return ir.StatusBlocked
 		}
 	}
 
 	return ir.StatusOpen
+}
+
+// deriveStatus returns the ir.Status for an attestation.
+// For v2 attestations (ProtocolVersion == 2) it re-derives status from
+// ObligationResults, ignoring the writable Outcome field (Milestone 37 P0).
+func deriveStatus(att *ir.Attestation) ir.Status {
+	if att.Checker.ProtocolVersion == 2 {
+		if len(att.ObligationResults) == 0 {
+			return ir.StatusRejected
+		}
+		for _, r := range att.ObligationResults {
+			if r.Verdict != "pass" {
+				return ir.StatusRejected
+			}
+		}
+		return ir.StatusAccepted
+	}
+	return ir.Status(att.Outcome)
 }

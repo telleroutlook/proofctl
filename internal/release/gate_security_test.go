@@ -210,3 +210,123 @@ func TestAdversarial_ConcurrentRelease(t *testing.T) {
 		}
 	}
 }
+
+// TestAdversarial_ForgingV2OutcomeFieldCannotBypassC01 verifies that a v2 attestation
+// whose "outcome" field was hand-crafted to "accepted" (but has no passing obligation
+// results) is rejected by C01 — the forged Outcome field must not be trusted.
+func TestAdversarial_ForgingV2OutcomeFieldCannotBypassC01(t *testing.T) {
+	t.Parallel()
+	outDir := t.TempDir()
+	g := &release.Gate{OutputDir: outDir}
+
+	graph := secBuildGraph(t, "c1")
+
+	// Attacker writes a v2 attestation with "outcome":"accepted" but no ObligationResults.
+	// This is the attack described in the evaluation report (Milestone 37 P0).
+	forgedAtt := &ir.Attestation{
+		ClaimID: "c1",
+		Checker: ir.CheckerIdentity{ProtocolVersion: 2},
+		Outcome: string(ir.StatusAccepted), // forged — must NOT be trusted by C01
+		// ObligationResults intentionally empty — no checker ever ran
+	}
+	atts := map[string]*ir.Attestation{"c1": forgedAtt}
+	pol := policy.ReleasePolicy{
+		Version:        "2",
+		Target:         "c1",
+		RequiredClaims: []string{"c1"},
+	}
+
+	pass, blockers, err := g.Release(graph, atts, pol, nil)
+	if err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if pass {
+		t.Error("forged v2 Outcome='accepted' with no ObligationResults must NOT pass release")
+	}
+	if len(blockers) == 0 {
+		t.Error("expected at least one blocker for forged attestation")
+	}
+	// Verify STATUS.json also records released=false.
+	data, readErr := os.ReadFile(filepath.Join(outDir, release.StatusFile))
+	if readErr != nil {
+		t.Fatalf("read STATUS.json: %v", readErr)
+	}
+	var rs release.ReleaseStatus
+	if jsonErr := json.Unmarshal(data, &rs); jsonErr != nil {
+		t.Fatalf("unmarshal STATUS.json: %v", jsonErr)
+	}
+	if rs.Released {
+		t.Error("STATUS.json must have released=false for forged attestation")
+	}
+}
+
+// TestAdversarial_ForgingV2OutcomeWithFailObligations verifies that a v2 attestation
+// with one failing obligation is also rejected even if Outcome is set to "accepted".
+func TestAdversarial_ForgingV2OutcomeWithFailObligations(t *testing.T) {
+	t.Parallel()
+	outDir := t.TempDir()
+	g := &release.Gate{OutputDir: outDir}
+
+	graph := secBuildGraph(t, "c1")
+
+	forgedAtt := &ir.Attestation{
+		ClaimID: "c1",
+		Checker: ir.CheckerIdentity{ProtocolVersion: 2},
+		Outcome: string(ir.StatusAccepted), // forged
+		ObligationResults: []ir.ObligationResult{
+			{ID: "ob-pass", Verdict: "pass"},
+			{ID: "ob-fail", Verdict: "fail"}, // one failure — must block
+		},
+	}
+	atts := map[string]*ir.Attestation{"c1": forgedAtt}
+	pol := policy.ReleasePolicy{Version: "2", Target: "c1", RequiredClaims: []string{"c1"}}
+
+	pass, _, err := g.Release(graph, atts, pol, nil)
+	if err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if pass {
+		t.Error("v2 attestation with a failing obligation must NOT pass release")
+	}
+}
+
+// TestAdversarial_V2AllPassObligationsAreAccepted verifies the positive case:
+// a v2 attestation with all obligations passing is correctly accepted.
+func TestAdversarial_V2AllPassObligationsAreAccepted(t *testing.T) {
+	t.Parallel()
+	outDir := t.TempDir()
+	g := &release.Gate{OutputDir: outDir}
+
+	graph := secBuildGraph(t, "c1")
+
+	goodAtt := &ir.Attestation{
+		ClaimID:        "c1",
+		Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
+		Outcome:        string(ir.StatusAccepted),
+		SelfDigest:     "sha256:abc",
+		StartFreshness: "sha256:s",
+		EndFreshness:   "sha256:e",
+		ObligationResults: []ir.ObligationResult{
+			{ID: "ob-1", Verdict: "pass"},
+			{ID: "ob-2", Verdict: "pass"},
+		},
+	}
+	atts := map[string]*ir.Attestation{"c1": goodAtt}
+	pol := policy.ReleasePolicy{
+		Version:        "2",
+		Target:         "c1",
+		RequiredClaims: []string{"c1"},
+		AllowedAssurances: []string{
+			"deterministic-cap", "formal-kernel", "exact-replay",
+			"reproducible-computation", "independent-review",
+		},
+	}
+
+	pass, blockers, err := g.Release(graph, atts, pol, nil)
+	if err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if !pass {
+		t.Errorf("v2 attestation with all-pass obligations must succeed; blockers: %v", blockers)
+	}
+}

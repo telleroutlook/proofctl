@@ -31,6 +31,9 @@ func makeTestGraph(t *testing.T) (*dag.DAG, map[string]*ir.Attestation) {
 			StartFreshness: "sha256:start1",
 			EndFreshness:   "sha256:end1",
 			Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
+			ObligationResults: []ir.ObligationResult{
+				{ID: "ob-1", Verdict: "pass"},
+			},
 			Metadata: map[string]string{
 				"cap_format_version":   "v2",
 				"digests_fresh":        "true",
@@ -51,6 +54,9 @@ func makeTestGraph(t *testing.T) (*dag.DAG, map[string]*ir.Attestation) {
 			StartFreshness: "sha256:start2",
 			EndFreshness:   "sha256:end2",
 			Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
+			ObligationResults: []ir.ObligationResult{
+				{ID: "ob-1", Verdict: "pass"},
+			},
 		},
 	}
 	return d, atts

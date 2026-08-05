@@ -35,6 +35,9 @@ func coverAtt(claimID string) *ir.Attestation {
 		StartFreshness: "sha256:s" + claimID,
 		EndFreshness:   "sha256:e" + claimID,
 		Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
+		ObligationResults: []ir.ObligationResult{
+			{ID: "ob-1", Verdict: "pass"},
+		},
 	}
 }
 
@@ -427,9 +430,11 @@ func TestBuildClaimSummary(t *testing.T) {
 	atts := map[string]*ir.Attestation{
 		"a": {ClaimID: "a", Outcome: string(ir.StatusAccepted), Assurance: ir.AssuranceFormalKernel,
 			SelfDigest: "sha256:a", StartFreshness: "sha256:sa", EndFreshness: "sha256:ea",
-			Checker: ir.CheckerIdentity{ProtocolVersion: 2}},
+			Checker:           ir.CheckerIdentity{ProtocolVersion: 2},
+			ObligationResults: []ir.ObligationResult{{ID: "ob-1", Verdict: "pass"}}},
 		"b": {ClaimID: "b", Outcome: string(ir.StatusRejected), Assurance: ir.AssuranceFormalKernel,
-			Checker: ir.CheckerIdentity{ProtocolVersion: 2}},
+			Checker:           ir.CheckerIdentity{ProtocolVersion: 2},
+			ObligationResults: []ir.ObligationResult{{ID: "ob-1", Verdict: "fail"}}},
 		// c has no attestation → open
 	}
 	pol := policy.ReleasePolicy{Version: "v1", Target: "a"}

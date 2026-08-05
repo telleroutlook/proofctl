@@ -6,7 +6,41 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [v0.3.7] — 2026-08-05
+## [v0.3.8] — 2026-08-05
+
+### Security
+
+- **P0: C01 no longer trusts writable `outcome` field for v2 attestations**
+  (`internal/release/conditions.go`, `internal/status/status.go`).
+  Previously `checkC01GlobalStatus` read `att.Outcome` directly — a field
+  present in the on-disk JSON that any user could set to `"accepted"`. A
+  hand-crafted attestation with `"outcome":"accepted"` but no real checker
+  run could bypass release. Now for v2 attestations (`protocol_version: 2`)
+  acceptance is derived from `ObligationResults` (all verdicts must be
+  `"pass"`); the `Outcome` field is ignored. v1 attestations continue to use
+  `Outcome` as before (they are blocked at the release gate by the existing
+  `LEGACY_ATTESTATION_NOT_RELEASABLE` check).
+
+### Added
+
+- **`ir.Attestation.ObligationResults`**: new field stores per-obligation
+  verdicts in the on-disk attestation JSON for v2 checker runs. Populated by
+  `proofctl verify` and `proofctl check`. Existing v1 attestations omit the
+  field (`omitempty`) and are unaffected.
+- **Three new adversarial regression tests** in `gate_security_test.go`:
+  `TestAdversarial_ForgingV2OutcomeFieldCannotBypassC01`,
+  `TestAdversarial_ForgingV2OutcomeWithFailObligations`,
+  `TestAdversarial_V2AllPassObligationsAreAccepted`.
+
+### Fixed
+
+- **`SECURITY.md` version** updated to match current release (`v0.3.8`).
+- **CI `version-sync` step** added to `.github/workflows/ci.yml`: fails the
+  build when `SECURITY.md` version drifts from the latest `CHANGELOG.md` tag.
+- **`README.md` scope disclaimer** added to the intro paragraph: proofctl
+  verifies process integrity and reproducibility, not mathematical correctness.
+
+
 
 ### Added
 

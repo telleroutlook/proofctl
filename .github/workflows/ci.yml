@@ -46,6 +46,17 @@ jobs:
             exit 1
           fi
 
+      - name: Version sync check
+        run: |
+          changelog_ver=$(grep -m1 '^## \[v' CHANGELOG.md | sed 's/.*\[\(v[^]]*\)\].*/\1/')
+          security_ver=$(grep -m1 '`v[0-9]' SECURITY.md | sed "s/.*\`\(v[^']*\)\`.*/\1/")
+          if [ "$changelog_ver" != "$security_ver" ]; then
+            echo "ERROR: SECURITY.md version ($security_ver) does not match latest CHANGELOG.md version ($changelog_ver)"
+            echo "Update SECURITY.md to reference $changelog_ver"
+            exit 1
+          fi
+          echo "OK: version $changelog_ver is in sync"
+
       - name: Static analysis
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 

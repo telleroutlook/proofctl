@@ -274,12 +274,24 @@ func (p *Pipeline) Run(
 		CacheKey: cacheKey,
 	}
 	// Extract toolchain from v2 output if available, for cache key recomputation.
+	// Also persist ObligationResults so the release gate can re-derive acceptance
+	// without trusting the writable Outcome field (Milestone 37 P0).
 	if runErr == nil && len(outputBytes) > 0 {
 		var outV2 protov2.CheckerOutputV2
 		if jsonErr := json.Unmarshal(outputBytes, &outV2); jsonErr == nil {
 			if len(outV2.Toolchain) > 0 {
 				att.Toolchain = outV2.Toolchain
 				att.CacheKey = checker.CacheKeyWithToolchain(claim, deps, evidence, checkerID, checkerID.SchemaDigest, policyDigest, outV2.Toolchain)
+			}
+			if len(outV2.ObligationResults) > 0 {
+				for _, r := range outV2.ObligationResults {
+					att.ObligationResults = append(att.ObligationResults, ir.ObligationResult{
+						ID:            r.ID,
+						Verdict:       string(r.Verdict),
+						WitnessDigest: r.WitnessDigest,
+						Method:        r.Method,
+					})
+				}
 			}
 		}
 	}

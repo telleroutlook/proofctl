@@ -130,12 +130,6 @@ func (g *Gate) DryRun(
 // release passes, also writes release-manifest.json to ProjectRoot.
 // It is the only function allowed to write STATUS.json.
 // Returns (pass, blockers).
-//
-// TODO M25: v2 must re-derive claim states from internal/kernel (proofverify kernel)
-// rather than trusting attestation.Outcome (a writable field). The current v1 path
-// reads attestation.Outcome directly, which means a hand-crafted attestation JSON
-// with "outcome":"accepted" can bypass release checks. The v2 path will call
-// kernel/derive.DeriveClaimState for each node and feed the result into the gate.
 func (g *Gate) Release(
 	graph *dag.DAG,
 	attestations map[string]*ir.Attestation,
