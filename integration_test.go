@@ -486,8 +486,8 @@ func TestPhase5ColdReplay(t *testing.T) {
 	}
 
 	// Compare failing condition IDs (which are deterministic, unlike claim-list strings).
-	conds1 := release.EvaluateConditions(g1, atts1, pol)
-	conds2 := release.EvaluateConditions(g2, atts2, pol)
+	conds1 := release.EvaluateConditions(g1, atts1, pol, "")
+	conds2 := release.EvaluateConditions(g2, atts2, pol, "")
 
 	var failedIDs1, failedIDs2 []string
 	for _, c := range conds1 {
