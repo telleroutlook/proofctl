@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/telleroutlook/proofctl/internal/compile"
 	"github.com/telleroutlook/proofctl/internal/config"
 	"github.com/telleroutlook/proofctl/internal/dag"
 	errors "github.com/telleroutlook/proofctl/internal/errors"
@@ -74,18 +75,28 @@ func cmdAttest(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, "attest: "+err.Error())
 	}
 
-	root, _, g, _ := loadProjectGraph(useJSON)
+	root, cfg, g, _ := loadProjectGraph(useJSON)
 
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
 	if err := os.MkdirAll(attestDir, 0o755); err != nil {
 		die(useJSON, errors.CodeInternalError, "attest: mkdir: "+err.Error())
 	}
 
+	// Load the compiled ProofGraph to resolve CheckerIdentity for v2 attestations.
+	checkersByID := map[string]ir.CheckerIdentity{}
+	if graphData, readErr := os.ReadFile(filepath.Join(root, config.DirName, cfg.GraphSource)); readErr == nil {
+		if pg, compErr := compile.Compile(graphData, compile.FormatJSON); compErr == nil {
+			for _, ch := range pg.Checkers {
+				checkersByID[ch.ID] = ch
+			}
+		}
+	}
+
 	// Resolve signing key once (shared by both single and batch paths).
 	signingKey := resolveSigningKey(*keyFlag, useJSON)
 
 	if *batchFlag != "" {
-		cmdAttestBatch(*batchFlag, attestDir, g, signingKey, *forceFlag, useJSON)
+		cmdAttestBatch(*batchFlag, attestDir, g, checkersByID, signingKey, *forceFlag, useJSON)
 		return
 	}
 
@@ -124,7 +135,8 @@ func cmdAttest(args []string, useJSON bool) {
 		evidence = append(evidence, ir.EvidenceDescriptor{Digest: d})
 	}
 
-	att, attPath, err := buildAndWriteAttestation(attestDir, claimID, assurance, outcome, evidence, metadata, signingKey, *forceFlag)
+	checker := checkersByID[g.Claim(claimID).CheckerPolicy]
+	att, attPath, err := buildAndWriteAttestation(attestDir, claimID, assurance, outcome, evidence, metadata, checker, signingKey, *forceFlag)
 	if err != nil {
 		die(useJSON, errors.CodeInvalidInput, "attest: "+err.Error())
 	}
@@ -149,7 +161,7 @@ func cmdAttest(args []string, useJSON bool) {
 
 // cmdAttestBatch reads a JSON array of batchEntry objects and writes one
 // attestation per entry, sharing the signing key and force flag.
-func cmdAttestBatch(manifestPath, attestDir string, g *dag.DAG, signingKey *signing.Key, force, useJSON bool) {
+func cmdAttestBatch(manifestPath, attestDir string, g *dag.DAG, checkersByID map[string]ir.CheckerIdentity, signingKey *signing.Key, force, useJSON bool) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		die(useJSON, errors.CodeInvalidInput, "attest --batch: read manifest: "+err.Error())
@@ -232,7 +244,11 @@ func cmdAttestBatch(manifestPath, attestDir string, g *dag.DAG, signingKey *sign
 			evidence = append(evidence, ir.EvidenceDescriptor{Digest: d})
 		}
 
-		att, attPath, writeErr := buildAndWriteAttestation(attestDir, e.Claim, assurance, outcome, evidence, metadata, signingKey, force)
+		checker := checkersByID[e.Claim]
+		if cl := g.Claim(e.Claim); cl != nil {
+			checker = checkersByID[cl.CheckerPolicy]
+		}
+		att, attPath, writeErr := buildAndWriteAttestation(attestDir, e.Claim, assurance, outcome, evidence, metadata, checker, signingKey, force)
 		if writeErr != nil {
 			results = append(results, batchResult{Claim: e.Claim, Error: writeErr.Error()})
 			failed++
@@ -269,6 +285,7 @@ func buildAndWriteAttestation(
 	outcome string,
 	evidence []ir.EvidenceDescriptor,
 	metadata map[string]string,
+	checker ir.CheckerIdentity,
 	signingKey *signing.Key,
 	force bool,
 ) (*ir.Attestation, string, error) {
@@ -281,6 +298,7 @@ func buildAndWriteAttestation(
 		StartFreshness: now,
 		EndFreshness:   now,
 		Metadata:       metadata,
+		Checker:        checker,
 	}
 	if len(metadata) == 0 {
 		att.Metadata = nil

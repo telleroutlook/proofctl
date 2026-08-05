@@ -267,8 +267,8 @@ func checkCheckerPinned(root string) doctorCheck {
 	}
 }
 
-// checkCASNonEmpty checks whether the CAS directory has at least one entry,
-// but only if graph.json declares any evidence.
+// checkCASNonEmpty verifies that every evidence digest declared in graph.json
+// exists in the local CAS.
 func checkCASNonEmpty(root string) doctorCheck {
 	pg := loadCompiledGraph(root)
 	if pg == nil || len(pg.Evidence) == 0 {
@@ -280,19 +280,30 @@ func checkCASNonEmpty(root string) doctorCheck {
 	}
 
 	casDir := filepath.Join(root, config.DirName, config.CASDir)
-	entries, err := os.ReadDir(casDir)
-	if err != nil || len(entries) == 0 {
+	var missing []string
+	for _, ev := range pg.Evidence {
+		hex := strings.TrimPrefix(ev.Digest, "sha256:")
+		if len(hex) < 3 {
+			missing = append(missing, ev.Digest)
+			continue
+		}
+		blobPath := filepath.Join(casDir, "sha256", hex[:2], hex[2:])
+		if _, err := os.Stat(blobPath); err != nil {
+			missing = append(missing, ev.Digest)
+		}
+	}
+	if len(missing) > 0 {
 		return doctorCheck{
 			Name:   "cas-non-empty",
 			OK:     false,
-			Detail: "CAS is empty — no evidence imported yet",
-			Fix:    "run 'proofctl cas import <cert-file>' for each evidence file",
+			Detail: fmt.Sprintf("%d/%d evidence digest(s) missing from CAS: %s", len(missing), len(pg.Evidence), strings.Join(missing, ", ")),
+			Fix:    "run 'proofctl cas import <cert-file>' for each missing evidence file",
 		}
 	}
 	return doctorCheck{
 		Name:   "cas-non-empty",
 		OK:     true,
-		Detail: fmt.Sprintf("CAS has %d entry/entries", len(entries)),
+		Detail: fmt.Sprintf("all %d declared evidence digest(s) present in CAS", len(pg.Evidence)),
 	}
 }
 

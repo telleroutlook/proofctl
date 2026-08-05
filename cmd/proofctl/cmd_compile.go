@@ -310,6 +310,9 @@ func compileContractDir(dir string, existing *ir.ProofGraph, useJSON bool) (*ir.
 	if len(pg.Claims) == 0 {
 		return nil, fmt.Errorf("contract-dir: no ContractV2 JSON files found in %q", dir)
 	}
+	if existing != nil {
+		pg.Checkers = existing.Checkers
+	}
 	return &pg, nil
 }
 

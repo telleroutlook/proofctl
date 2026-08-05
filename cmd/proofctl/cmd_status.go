@@ -142,7 +142,13 @@ func printStatus(verbose, useJSON bool) {
 		}
 
 		annotation := ""
-		if att, ok := attestations[id]; ok && att.BlockReason != "" {
+		if att, ok := attestations[id]; ok && s == ir.StatusRejected {
+			if att.BlockReason != "" {
+				annotation = "  " + att.BlockReason
+			} else if att.Metadata["note"] != "" {
+				annotation = "  " + att.Metadata["note"]
+			}
+		} else if att, ok := attestations[id]; ok && att.BlockReason != "" {
 			annotation = "  " + att.BlockReason
 		} else if s == ir.StatusOpen {
 			annotation = "  (" + openReasons[id] + ")"

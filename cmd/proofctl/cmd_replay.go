@@ -320,6 +320,34 @@ func cmdReplay(args []string, useJSON bool) {
 	}
 
 	// Write attestation only when all evidence items pass.
+	// Collect obligation_results and metadata from checker stdout.
+	var obligationResults []ir.ObligationResult
+	checkerMetadata := map[string]string{}
+	for _, res := range results {
+		if res.checkerPass && res.checkerOutput != "" {
+			var out struct {
+				ObligationResults []struct {
+					ID      string `json:"id"`
+					Verdict string `json:"verdict"`
+					Method  string `json:"method,omitempty"`
+				} `json:"obligation_results"`
+				Metadata map[string]string `json:"metadata,omitempty"`
+			}
+			if err := json.Unmarshal([]byte(res.checkerOutput), &out); err == nil {
+				for _, r := range out.ObligationResults {
+					obligationResults = append(obligationResults, ir.ObligationResult{
+						ID:      r.ID,
+						Verdict: r.Verdict,
+						Method:  r.Method,
+					})
+				}
+				for k, v := range out.Metadata {
+					checkerMetadata[k] = v
+				}
+			}
+		}
+	}
+
 	attestPath := ""
 	if allPass {
 		digests := make([]string, len(pairs))
@@ -334,25 +362,32 @@ func cmdReplay(args []string, useJSON bool) {
 		}
 		wallMillis := time.Since(replayStart).Milliseconds()
 		att := ir.Attestation{
-			ClaimID:        *claimIDFlag,
-			Checker:        checkerIdentity,
-			Outcome:        string(ir.StatusAccepted),
-			Assurance:      assurance,
-			ReplayMode:     "from_scratch",
-			StartFreshness: replayDate,
-			EndFreshness:   replayDate,
+			ClaimID:           *claimIDFlag,
+			Checker:           checkerIdentity,
+			Outcome:           string(ir.StatusAccepted),
+			Assurance:         assurance,
+			ReplayMode:        "from_scratch",
+			StartFreshness:    replayDate,
+			EndFreshness:      replayDate,
+			ObligationResults: obligationResults,
 			Resources: ir.ResourceStats{
 				WallMillis: wallMillis,
 			},
-			Metadata: map[string]string{
-				"cold_replay_date": replayDate,
-				"evidence_count":   fmt.Sprintf("%d", len(pairs)),
-				"evidence_digests": strings.Join(digests, ","),
-				"generator_cmds":   strings.Join(generators, "|"),
-				"digests_fresh":    "true",
-				"checker_exit":     "0",
-				"semantic_replay":  fmt.Sprintf("%v", *semanticFlag),
-			},
+			Metadata: func() map[string]string {
+				m := map[string]string{
+					"cold_replay_date": replayDate,
+					"evidence_count":   fmt.Sprintf("%d", len(pairs)),
+					"evidence_digests": strings.Join(digests, ","),
+					"generator_cmds":   strings.Join(generators, "|"),
+					"digests_fresh":    "true",
+					"checker_exit":     "0",
+					"semantic_replay":  fmt.Sprintf("%v", *semanticFlag),
+				}
+				for k, v := range checkerMetadata {
+					m[k] = v
+				}
+				return m
+			}(),
 		}
 		if sd, sdErr := ir.DigestOf(&att); sdErr == nil {
 			att.SelfDigest = sd
@@ -704,7 +739,7 @@ func writePartialReplayRecord(claimID, date string, results []replayItemResult, 
 
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
 	_ = os.MkdirAll(attestDir, 0o755)
-	partialPath := filepath.Join(attestDir, claimID+"-replay-partial.json")
+	partialPath := filepath.Join(attestDir, claimID+"-replay-partial.debug")
 	data, _ := json.MarshalIndent(rec, "", "  ")
 	if writeErr := os.WriteFile(partialPath, append(data, '\n'), 0o644); writeErr == nil && !useJSON {
 		fmt.Printf("  partial debug record written to %s\n", partialPath)
