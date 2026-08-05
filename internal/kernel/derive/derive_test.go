@@ -326,3 +326,88 @@ func TestStateOrdinal_Unknown(t *testing.T) {
 		t.Errorf("unknown dep state should not satisfy any requirement, want LOCALLY_VERIFIED, got %s", got)
 	}
 }
+
+// ── T-M34-2: native-dev hard ban ─────────────────────────────────────────────
+
+func TestNativeDevCappedAtLocallyVerified(t *testing.T) {
+	t.Parallel()
+	// With all obligations passing and deps satisfied, native-dev must never
+	// reach GLOBALLY_VERIFIED — it is capped at LOCALLY_VERIFIED (INV-10, T-M34-2).
+	in := derive.DeriveInput{
+		ClaimID:             "thm-main",
+		CurrentIdentity:     "sha256:aaaa",
+		AttestationIdentity: "sha256:aaaa",
+		Evidence:            derive.EvidencePresent,
+		ObligationSet:       derive.ObligationSetPass,
+		RuntimeClass:        "native-dev",
+		DepStates:           map[string]derive.ClaimStateV2{},
+		RequiredDepStates:   map[string]derive.ClaimStateV2{},
+	}
+	got := derive.DeriveClaimState(in)
+	if got != derive.StateLocallyVerified {
+		t.Errorf("T-M34-2 VIOLATED: native-dev must be capped at LOCALLY_VERIFIED, got %s", got)
+	}
+}
+
+func TestNativeDevCappedEvenWithReplayAndManifest(t *testing.T) {
+	t.Parallel()
+	// Even with replay + signed manifest, native-dev cannot reach RELEASED.
+	in := derive.DeriveInput{
+		ClaimID:             "thm-main",
+		CurrentIdentity:     "sha256:aaaa",
+		AttestationIdentity: "sha256:aaaa",
+		Evidence:            derive.EvidencePresent,
+		ObligationSet:       derive.ObligationSetPass,
+		RuntimeClass:        "native-dev",
+		HasReplay:           true,
+		IsReleaseRoot:       true,
+		HasSignedManifest:   true,
+		DepStates:           map[string]derive.ClaimStateV2{},
+		RequiredDepStates:   map[string]derive.ClaimStateV2{},
+	}
+	got := derive.DeriveClaimState(in)
+	if got == derive.StateGloballyVerified || got == derive.StateReproducible || got == derive.StateReleased {
+		t.Errorf("T-M34-2 VIOLATED: native-dev must never reach %s", got)
+	}
+	if got != derive.StateLocallyVerified {
+		t.Errorf("T-M34-2: expected LOCALLY_VERIFIED, got %s", got)
+	}
+}
+
+func TestNativeAlsoCapped(t *testing.T) {
+	t.Parallel()
+	// "native" (without -dev) is also capped.
+	in := derive.DeriveInput{
+		ClaimID:             "thm-main",
+		CurrentIdentity:     "sha256:aaaa",
+		AttestationIdentity: "sha256:aaaa",
+		Evidence:            derive.EvidencePresent,
+		ObligationSet:       derive.ObligationSetPass,
+		RuntimeClass:        "native",
+		DepStates:           map[string]derive.ClaimStateV2{},
+		RequiredDepStates:   map[string]derive.ClaimStateV2{},
+	}
+	got := derive.DeriveClaimState(in)
+	if got != derive.StateLocallyVerified {
+		t.Errorf("T-M34-2: 'native' runtime must be capped at LOCALLY_VERIFIED, got %s", got)
+	}
+}
+
+func TestIsolatedOCICanReachGloballyVerified(t *testing.T) {
+	t.Parallel()
+	// OCI runner (isolated-oci) must NOT be capped — it can reach GLOBALLY_VERIFIED.
+	in := derive.DeriveInput{
+		ClaimID:             "thm-main",
+		CurrentIdentity:     "sha256:aaaa",
+		AttestationIdentity: "sha256:aaaa",
+		Evidence:            derive.EvidencePresent,
+		ObligationSet:       derive.ObligationSetPass,
+		RuntimeClass:        "isolated-oci",
+		DepStates:           map[string]derive.ClaimStateV2{},
+		RequiredDepStates:   map[string]derive.ClaimStateV2{},
+	}
+	got := derive.DeriveClaimState(in)
+	if got != derive.StateGloballyVerified {
+		t.Errorf("isolated-oci must reach GLOBALLY_VERIFIED, got %s", got)
+	}
+}

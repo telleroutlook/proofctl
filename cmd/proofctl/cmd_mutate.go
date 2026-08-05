@@ -21,8 +21,34 @@ import (
 //
 // Usage:
 //
-//	proofctl mutate [--catalog platform] [--json]
+//	proofctl mutate [--catalog platform] [--mode static|dynamic] [--json]
+//
+// --mode static  (default) runs the fixed fixture catalog from testdata/mutation/.
+// --mode dynamic runs structural field mutations inline (T-M34-4: proof-of-concept
+//
+//	for the dynamic mutation engine; full fuzzing harness is planned).
 func cmdMutate(args []string, useJSON bool) {
+	// Parse --mode flag (default: static).
+	mode := "static"
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--mode" && i+1 < len(args) {
+			mode = args[i+1]
+			i++
+		} else if strings.HasPrefix(args[i], "--mode=") {
+			mode = strings.TrimPrefix(args[i], "--mode=")
+		}
+	}
+
+	if mode != "static" && mode != "dynamic" {
+		fmt.Fprintf(os.Stderr, "mutate: unknown --mode %q (want static or dynamic)\n", mode)
+		os.Exit(1)
+	}
+
+	if mode == "dynamic" {
+		runDynamicMutation(useJSON)
+		return
+	}
+
 	// Locate testdata/mutation relative to the binary's location or the
 	// project root detected from .proofctl/.
 	mutationDir := findMutationDir()
@@ -255,6 +281,38 @@ func mutCheckAttestationIdentity(file string) func(string) (bool, string, string
 			return true, "DeriveClaimState: STALE (INV-09)", ""
 		}
 		return false, "", "neither attestation.Validate nor DeriveClaimState caught the stale identity"
+	}
+}
+
+// runDynamicMutation performs structural field mutations inline.
+//
+// This is a proof-of-concept for the dynamic mutation engine (T-M34-4).
+// Full implementation replaces this with a fuzzing harness.
+//
+// The test constructs a CheckerOutputV2 with a deliberately incomplete
+// obligation set, then asserts that ValidateOutput rejects it.
+func runDynamicMutation(useJSON bool) {
+	fmt.Println("dynamic mutation mode: running structural field mutations")
+
+	out := v2.CheckerOutputV2{
+		ProtocolVersion: 2,
+		ClaimID:         "thm-dynamic-test",
+		ObligationResults: []v2.ObligationResult{
+			{ID: "obl.A", Verdict: "pass"},
+		},
+	}
+	expected := []string{"obl.A", "obl.B"} // obl.B missing — must be rejected
+	err := v2.ValidateOutput(out, "thm-dynamic-test", expected)
+	if err == nil {
+		fmt.Println("FAIL: dynamic mutation survived (should have been killed)")
+		if useJSON {
+			fmt.Println(`{"killed": false, "survived": 1, "mode": "dynamic"}`)
+		}
+		os.Exit(1)
+	}
+	fmt.Println("PASS: dynamic mutation killed")
+	if useJSON {
+		fmt.Println(`{"killed": true, "survived": 0, "mode": "dynamic"}`)
 	}
 }
 

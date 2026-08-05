@@ -87,6 +87,12 @@ type DeriveInput struct {
 	// signed manifest exists.
 	IsReleaseRoot     bool
 	HasSignedManifest bool
+
+	// RuntimeClass is the runtime class of the checker used for this attestation.
+	// "native-dev" is permanently capped at LOCALLY_VERIFIED — it cannot reach
+	// GLOBALLY_VERIFIED, REPRODUCIBLE, or RELEASED regardless of policy.
+	// This is a kernel-level hard rule, not a policy override (INV-10 complement).
+	RuntimeClass string
 }
 
 // DeriveClaimState computes the canonical state for a single claim.
@@ -98,6 +104,7 @@ type DeriveInput struct {
 //  4. If ObligationSet is absent and Evidence is absent/partial → OPEN
 //  5. If ObligationSet is absent but Evidence is present → CANDIDATE
 //  6. If ObligationSet passes exactly and all deps at required state → GLOBALLY_VERIFIED
+//     6a. Unless RuntimeClass is "native-dev" or "native" → capped at LOCALLY_VERIFIED (T-M34-2)
 //  7. If ObligationSet passes exactly but some dep below required state → LOCALLY_VERIFIED
 //     (INV-08: dep not at required state prevents upgrade, but does not propagate BLOCKED)
 //  8. If GLOBALLY_VERIFIED and HasReplay → REPRODUCIBLE
@@ -128,9 +135,16 @@ func DeriveClaimState(in DeriveInput) ClaimStateV2 {
 		return StateCandidate
 	}
 
-	// Rule 6/7: obligations pass exactly — determine if deps allow GV upgrade.
+	// Rule 6/6a/7: obligations pass exactly — determine if deps allow GV upgrade.
 	if in.ObligationSet != ObligationSetPass {
 		return StateBlocked
+	}
+
+	// Rule 6a: native-dev runtime is permanently capped at LOCALLY_VERIFIED (T-M34-2).
+	// This is a kernel-level invariant — no policy can override it.
+	nativeDevCapped := in.RuntimeClass == "native-dev" || in.RuntimeClass == "native"
+	if nativeDevCapped {
+		return StateLocallyVerified
 	}
 
 	// Check whether all required deps are at required state (INV-08).
