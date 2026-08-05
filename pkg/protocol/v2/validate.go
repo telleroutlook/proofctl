@@ -103,6 +103,9 @@ func ValidateOutput(out CheckerOutputV2, claimID string, expectedObligationIDs [
 // AllObligationsPass returns true iff every ObligationResult has verdict "pass".
 // Callers must first call ValidateOutput to ensure the set is valid.
 func AllObligationsPass(out CheckerOutputV2) bool {
+	if len(out.ObligationResults) == 0 {
+		return false // OBLIGATION_EMPTY: empty results cannot constitute a pass
+	}
 	for _, r := range out.ObligationResults {
 		if r.Verdict != VerdictPass {
 			return false

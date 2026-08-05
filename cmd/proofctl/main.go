@@ -36,6 +36,7 @@ import (
 	errors "github.com/telleroutlook/proofctl/internal/errors"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/policy"
+	"github.com/telleroutlook/proofctl/internal/signing"
 )
 
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
@@ -251,6 +252,16 @@ func loadAttestations(root string, useJSON bool) map[string]*ir.Attestation {
 		if err != nil {
 			die(useJSON, errors.CodeInvalidInput, "invalid attestation "+entry.Name()+": "+err.Error())
 		}
+		// T-M31-2: for v2 attestations, verify self-digest integrity.
+		if att.Checker.ProtocolVersion == 2 {
+			if att.Signature != nil && att.Signature.Value != "" {
+				keysDir := filepath.Join(root, config.DirName, "keys")
+				if verifyErr := verifyAttestationSig(att, keysDir); verifyErr != nil {
+					die(useJSON, errors.CodeInvalidInput,
+						fmt.Sprintf("attestation %s: signature verification failed: %v", entry.Name(), verifyErr))
+				}
+			}
+		}
 		attestations[att.ClaimID] = att
 	}
 	return attestations
@@ -341,4 +352,41 @@ func topoSort(g *dag.DAG) ([]string, error) {
 		return nil, fmt.Errorf("cycle detected")
 	}
 	return order, nil
+}
+
+// verifyAttestationSig verifies the Ed25519 signature on a v2 attestation
+// against public keys in keysDir. Returns nil if valid or if no matching key
+// is found locally (key-not-found is allowed — key may not be local). Returns
+// an error only on cryptographic verification failure.
+func verifyAttestationSig(att *ir.Attestation, keysDir string) error {
+	sig := att.Signature
+	if sig == nil || sig.Value == "" {
+		return nil
+	}
+	// Load all public keys and find the one matching the signature fingerprint.
+	entries, err := os.ReadDir(keysDir)
+	if err != nil {
+		return nil // no keys dir — skip
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pub") {
+			continue
+		}
+		key, loadErr := signing.LoadPublic(filepath.Join(keysDir, e.Name()))
+		if loadErr != nil {
+			continue
+		}
+		if key.ID != sig.PubkeyFingerprint {
+			continue
+		}
+		// Found the matching key — perform cryptographic verification.
+		sigObj := signing.Signature{
+			PubkeyFingerprint: sig.PubkeyFingerprint,
+			Algorithm:         sig.Algorithm,
+			Value:             sig.Value,
+		}
+		return signing.Verify(key, att, sigObj)
+	}
+	// No local key with this fingerprint — cannot verify; allow (warn not error).
+	return nil
 }

@@ -346,7 +346,7 @@ func TestGenerality_PolicyEvaluate(t *testing.T) {
 		Outcome:   string(ir.StatusAccepted),
 		Assurance: ir.AssuranceAIReview, // forbidden
 	}
-	results := release.EvaluateConditions(d, atts, pol)
+	results := release.EvaluateConditions(d, atts, pol, "")
 	c03Passed := true
 	for _, r := range results {
 		if r.ID == release.CondAllAssurancesAllowed && !r.Passed {
@@ -390,6 +390,7 @@ func TestGenerality_ReleaseGate(t *testing.T) {
 			SelfDigest:     "sha256:aabbccddeeff00112233445566778899aabbccddeeff001122334455667788",
 			StartFreshness: "sha256:start",
 			EndFreshness:   "sha256:end",
+			Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
 			Metadata: map[string]string{
 				"cap_format_version":   "v2",
 				"digests_fresh":        "true",

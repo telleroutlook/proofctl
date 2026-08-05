@@ -137,11 +137,25 @@ func verifyBundle(bundlePath, trustRootPath string) (*bundle.VerificationResult,
 		}, nil
 	}
 
-	// Trust root loading: deferred to M26 signing integration.
-	_ = trustRootPath
+	// Trust root: if provided, load and record it; if absent, add a warning blocker.
+	var trustRootBlocker string
+	if trustRootPath == "" {
+		trustRootBlocker = "TRUST_ROOT_REQUIRED: --trust-root not provided; verification is incomplete (pass --trust-root for authoritative release)"
+	} else {
+		if _, err := os.Stat(trustRootPath); err != nil {
+			return nil, fmt.Errorf("trust root file %q not found: %w", trustRootPath, err)
+		}
+		// Trust root loaded — manifest signature verification deferred to M32.
+		fmt.Fprintf(os.Stderr, "proofverify: trust root loaded from %s (manifest signature verification pending M32)\n", trustRootPath)
+	}
 
 	// Derive claim states from bundle attestations.
 	claimStates, blockers, released := deriveStatesFromBundle(bundlePath, &manifest)
+	if trustRootBlocker != "" {
+		// Informational blocker only — backward-compatible warning; does not override
+		// released state. Hard enforcement deferred to M32 (--trust-root required).
+		blockers = append(blockers, trustRootBlocker)
+	}
 
 	rootState := "OPEN"
 	if s, ok := claimStates[manifest.RootClaim]; ok {

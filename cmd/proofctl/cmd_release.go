@@ -27,6 +27,7 @@ func cmdRelease(args []string, useJSON bool) {
 	gate := &release.Gate{
 		OutputDir:   filepath.Join(root, config.DirName),
 		ProjectRoot: root,
+		KeysDir:     filepath.Join(root, config.DirName, "keys"),
 	}
 
 	// Load raw graph to access evidence descriptors for manifest generation.
@@ -46,7 +47,7 @@ func cmdRelease(args []string, useJSON bool) {
 		ReleaseTarget interface{}       `json:"release_target"`
 	}
 
-	conditions := release.EvaluateConditions(g, attestations, pol)
+	conditions := release.EvaluateConditions(g, attestations, pol, filepath.Join(root, config.DirName, "keys"))
 	defects := collectDefects(attestations)
 
 	if *dryRunFlag {

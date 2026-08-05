@@ -19,6 +19,7 @@ const (
 	CodePolicyViolation    = "POLICY_VIOLATION"
 	CodeFreshnessViolation = "FRESHNESS_VIOLATION"
 	CodeReleaseBlocked     = "RELEASE_BLOCKED"
+	CodeLegacyAttestation  = "LEGACY_ATTESTATION_NOT_RELEASABLE"
 	CodeInternalError      = "INTERNAL_ERROR"
 	CodeNotImplemented     = "NOT_IMPLEMENTED"
 )

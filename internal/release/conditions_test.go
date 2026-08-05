@@ -61,7 +61,7 @@ func TestEvaluateConditions_NoMetadataKeys(t *testing.T) {
 			EndFreshness:   "sha256:e",
 		},
 	}
-	results := release.EvaluateConditions(g, atts, basePolicy)
+	results := release.EvaluateConditions(g, atts, basePolicy, "")
 	if len(results) != 4 {
 		t.Fatalf("expected 4 results, got %d", len(results))
 	}
@@ -91,7 +91,7 @@ func TestEvaluateConditions_WithMetadataKeys(t *testing.T) {
 			},
 		},
 	}
-	results := release.EvaluateConditions(g, atts, capPolicy)
+	results := release.EvaluateConditions(g, atts, capPolicy, "")
 	// 4 universal + 3 metadata = 7
 	if len(results) != 7 {
 		t.Fatalf("expected 7 results, got %d", len(results))
@@ -122,7 +122,7 @@ func TestEvaluateConditions_MetadataKeyMissing(t *testing.T) {
 			// No metadata at all.
 		},
 	}
-	results := release.EvaluateConditions(g, atts, capPolicy)
+	results := release.EvaluateConditions(g, atts, capPolicy, "")
 	if len(results) != 7 {
 		t.Fatalf("expected 7 results, got %d", len(results))
 	}
@@ -143,7 +143,7 @@ func TestEvaluateConditions_C01GlobalFail(t *testing.T) {
 	atts := map[string]*ir.Attestation{
 		"claim-a": {ClaimID: "claim-a", Outcome: "blocked", Assurance: "shadow-review"},
 	}
-	results := release.EvaluateConditions(g, atts, basePolicy)
+	results := release.EvaluateConditions(g, atts, basePolicy, "")
 	assertFailed(t, results[0], release.CondGlobalStatusAccepted, "C01")
 }
 
@@ -154,7 +154,7 @@ func TestEvaluateConditions_C02AssumptionFound(t *testing.T) {
 	atts := map[string]*ir.Attestation{
 		"claim-x": {ClaimID: "claim-x", Outcome: "accepted", Assurance: ir.AssuranceAssumption},
 	}
-	results := release.EvaluateConditions(g, atts, basePolicy)
+	results := release.EvaluateConditions(g, atts, basePolicy, "")
 	assertFailed(t, results[1], release.CondAssumptionFootprintEmpty, "C02")
 }
 
@@ -164,7 +164,7 @@ func TestEvaluateConditions_C03ForbiddenAssurance(t *testing.T) {
 	atts := map[string]*ir.Attestation{
 		"claim-f": {ClaimID: "claim-f", Outcome: "accepted", Assurance: ir.AssuranceAIReview},
 	}
-	results := release.EvaluateConditions(g, atts, basePolicy)
+	results := release.EvaluateConditions(g, atts, basePolicy, "")
 	assertFailed(t, results[2], release.CondAllAssurancesAllowed, "C03")
 }
 
@@ -177,7 +177,7 @@ func TestEvaluateConditions_C03NotInAllowedList(t *testing.T) {
 	atts := map[string]*ir.Attestation{
 		"claim-x": {ClaimID: "claim-x", Outcome: "accepted", Assurance: ir.AssuranceIndependentReview},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	assertFailed(t, results[2], release.CondAllAssurancesAllowed, "C03")
 }
 
@@ -190,7 +190,7 @@ func TestEvaluateConditions_C03EmptyAssuranceSkipped(t *testing.T) {
 	atts := map[string]*ir.Attestation{
 		"claim-v2": {ClaimID: "claim-v2", Outcome: "accepted", Assurance: ""},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	assertPassed(t, results[2], release.CondAllAssurancesAllowed, "C03")
 }
 
@@ -208,7 +208,7 @@ func TestEvaluateConditions_C04ReplayPresent(t *testing.T) {
 		},
 	}
 	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"formal-kernel"}}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	assertPassed(t, results[3], release.CondReplayConsistency, "C04")
 }
 
@@ -313,7 +313,7 @@ func TestC06AllowedMetadataValues_Pass(t *testing.T) {
 			"remainder_type": {"gl_bernstein_ellipse", "legendre_tail", "zero"},
 		},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	// 4 universal + 1 C06
 	if len(results) != 5 {
 		t.Fatalf("expected 5 results, got %d", len(results))
@@ -347,7 +347,7 @@ func TestC06AllowedMetadataValues_Fail(t *testing.T) {
 			"remainder_type": {"gl_bernstein_ellipse", "legendre_tail", "zero"},
 		},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c06 := results[4]
 	if c06.Passed {
 		t.Error("C06 should fail when value is not in allowed set")
@@ -375,7 +375,7 @@ func TestC07ConditionalMetadata_NotTriggered(t *testing.T) {
 		AllowedAssurances:       []string{"formal-kernel"},
 		ConditionalMetadataKeys: map[string]string{"kernel_branch": "drpp_bound_proof"},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c07 := results[4]
 	if c07.ID != release.CondConditionalMetadata {
 		t.Fatalf("results[4].ID = %q, want %q", c07.ID, release.CondConditionalMetadata)
@@ -403,7 +403,7 @@ func TestC07ConditionalMetadata_Triggered_Missing(t *testing.T) {
 		AllowedAssurances:       []string{"formal-kernel"},
 		ConditionalMetadataKeys: map[string]string{"kernel_branch": "drpp_bound_proof"},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c07 := results[4]
 	if c07.Passed {
 		t.Error("C07 should fail when trigger is present but required key is absent")
@@ -434,7 +434,7 @@ func TestC07ConditionalMetadata_Triggered_Present(t *testing.T) {
 		AllowedAssurances:       []string{"formal-kernel"},
 		ConditionalMetadataKeys: map[string]string{"kernel_branch": "drpp_bound_proof"},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c07 := results[4]
 	if !c07.Passed {
 		t.Errorf("C07 should pass when required key is present, got: %s", c07.Blocker)
@@ -459,7 +459,7 @@ func TestC08ReplayMode_Pass(t *testing.T) {
 		AllowedAssurances:  []string{"exact-replay"},
 		RequiredReplayMode: "from_scratch",
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c08 := results[4]
 	if c08.ID != release.CondReplayMode {
 		t.Fatalf("results[4].ID = %q, want %q", c08.ID, release.CondReplayMode)
@@ -487,7 +487,7 @@ func TestC08ReplayMode_Fail(t *testing.T) {
 		AllowedAssurances:  []string{"exact-replay"},
 		RequiredReplayMode: "from_scratch",
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c08 := results[4]
 	if c08.Passed {
 		t.Error("C08 should fail when replay_mode does not match required value")
@@ -515,7 +515,7 @@ func TestC08ReplayMode_LegacyExempt(t *testing.T) {
 		AllowedAssurances:  []string{"exact-replay"},
 		RequiredReplayMode: "from_scratch",
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c08 := results[4]
 	if !c08.Passed {
 		t.Errorf("C08 should exempt legacy attestations with empty replay_mode, got: %s", c08.Blocker)
@@ -546,7 +546,7 @@ func TestC09_NoNativeRuntime_Pass(t *testing.T) {
 		AllowedAssurances: []string{"deterministic-cap"},
 		ForbiddenRuntimes: []string{"native", "native-dev"},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	var c09 *release.ConditionResult
 	for i := range results {
 		if results[i].ID == release.CondNoNativeRuntime {
@@ -584,7 +584,7 @@ func TestC09_NoNativeRuntime_Fail(t *testing.T) {
 		AllowedAssurances: []string{"deterministic-cap"},
 		ForbiddenRuntimes: []string{"native", "native-dev"},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	var c09 *release.ConditionResult
 	for i := range results {
 		if results[i].ID == release.CondNoNativeRuntime {
@@ -625,7 +625,7 @@ func TestC09_NoNativeRuntime_NotActivatedWhenPolicyEmpty(t *testing.T) {
 		Version:           "1",
 		AllowedAssurances: []string{"deterministic-cap"},
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	for _, r := range results {
 		if r.ID == release.CondNoNativeRuntime {
 			t.Error("C09 must not appear in results when ForbiddenRuntimes is empty")

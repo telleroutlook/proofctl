@@ -52,13 +52,14 @@ func cmdCheck(args []string, useJSON bool) {
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
 	nr := &runner.NativeRunner{ProjectRoot: root}
 	pipe := &verify.Pipeline{
-		DAG:        g,
-		CAS:        store,
-		AttestDir:  attestDir,
-		Runner:     nr,
-		SigningKey: loadSigningKeyIfSet(),
-		TrustStore: filepath.Join(root, config.DirName, "keys"),
-		NoCache:    *noCacheFlag,
+		DAG:         g,
+		CAS:         store,
+		AttestDir:   attestDir,
+		Runner:      nr,
+		SigningKey:  loadSigningKeyIfSet(),
+		TrustStore:  filepath.Join(root, config.DirName, "keys"),
+		NoCache:     *noCacheFlag,
+		ProjectRoot: root,
 	}
 
 	if *allFlag {

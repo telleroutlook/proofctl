@@ -277,7 +277,7 @@ func TestShadowAssuranceForbidden(t *testing.T) {
 	}
 
 	// C03 (assurance enforcement) must block shadow-review.
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c03Blocked := false
 	for _, r := range results {
 		if r.ID == release.CondAllAssurancesAllowed && !r.Passed {
@@ -552,7 +552,7 @@ func TestPhase5ConditionResults(t *testing.T) {
 	}
 
 	// Evaluate all 13 conditions.
-	conditions := release.EvaluateConditions(g, atts, pol)
+	conditions := release.EvaluateConditions(g, atts, pol, "")
 
 	// Build a map for easy lookup.
 	condMap := make(map[release.ConditionID]release.ConditionResult, len(conditions))

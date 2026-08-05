@@ -10,6 +10,7 @@ import (
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/policy"
 	"github.com/telleroutlook/proofctl/internal/release"
+	"github.com/telleroutlook/proofctl/internal/signing"
 )
 
 // coverBuildGraph builds a minimal passing DAG with the given IDs.
@@ -33,6 +34,7 @@ func coverAtt(claimID string) *ir.Attestation {
 		SelfDigest:     "sha256:aa" + claimID,
 		StartFreshness: "sha256:s" + claimID,
 		EndFreshness:   "sha256:e" + claimID,
+		Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
 	}
 }
 
@@ -170,7 +172,7 @@ func TestC03_AssuranceNotInAllowedList(t *testing.T) {
 		AllowedAssurances: []string{"deterministic-cap"}, // formal-kernel not listed
 	}
 
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c03 := results[2]
 	if c03.ID != release.CondAllAssurancesAllowed {
 		t.Fatalf("results[2].ID = %q, want %q", c03.ID, release.CondAllAssurancesAllowed)
@@ -201,7 +203,7 @@ func TestC03_ForbiddenTakesPrecedence(t *testing.T) {
 		ForbiddenAssurances: []string{string(ir.AssuranceAIReview)},
 	}
 
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c03 := results[2]
 	if c03.Passed {
 		t.Error("C03 should fail for forbidden assurance")
@@ -212,7 +214,7 @@ func TestC03_ForbiddenTakesPrecedence(t *testing.T) {
 func TestC01_EmptyGraph(t *testing.T) {
 	t.Parallel()
 	g := dag.New()
-	results := release.EvaluateConditions(g, nil, policy.ReleasePolicy{Version: "v1"})
+	results := release.EvaluateConditions(g, nil, policy.ReleasePolicy{Version: "v1"}, "")
 	c01 := results[0]
 	if c01.ID != release.CondGlobalStatusAccepted {
 		t.Fatalf("results[0].ID = %q, want C01", c01.ID)
@@ -227,7 +229,7 @@ func TestC01_MissingAttestation(t *testing.T) {
 	t.Parallel()
 	g := coverBuildGraph(t, "c1")
 	// No attestations provided.
-	results := release.EvaluateConditions(g, map[string]*ir.Attestation{}, policy.ReleasePolicy{})
+	results := release.EvaluateConditions(g, map[string]*ir.Attestation{}, policy.ReleasePolicy{}, "")
 	c01 := results[0]
 	if c01.Passed {
 		t.Error("C01 should fail when attestation is missing")
@@ -251,7 +253,7 @@ func coverBuildGraphWithChecker(t *testing.T, ids ...string) *dag.DAG {
 func TestC04_MissingAttestation(t *testing.T) {
 	t.Parallel()
 	g := coverBuildGraphWithChecker(t, "c1")
-	results := release.EvaluateConditions(g, map[string]*ir.Attestation{}, policy.ReleasePolicy{})
+	results := release.EvaluateConditions(g, map[string]*ir.Attestation{}, policy.ReleasePolicy{}, "")
 	c04 := results[3]
 	if c04.ID != release.CondReplayConsistency {
 		t.Fatalf("results[3].ID = %q, want C04", c04.ID)
@@ -275,34 +277,51 @@ func TestC04_PartialFreshness(t *testing.T) {
 			// EndFreshness intentionally missing.
 		},
 	}
-	results := release.EvaluateConditions(g, atts, policy.ReleasePolicy{})
+	results := release.EvaluateConditions(g, atts, policy.ReleasePolicy{}, "")
 	c04 := results[3]
 	if c04.Passed {
 		t.Error("C04 should fail when EndFreshness is empty")
 	}
 }
 
-// TestC05_AllSigned verifies that C05 passes when all attestations have a signature.
+// TestC05_AllSigned verifies that C05 passes when all attestations carry a valid
+// Ed25519 signature that can be verified against a public key in keysDir.
 func TestC05_AllSigned(t *testing.T) {
 	t.Parallel()
-	g := coverBuildGraph(t, "c1")
-	atts := map[string]*ir.Attestation{
-		"c1": {
-			ClaimID:   "c1",
-			Outcome:   string(ir.StatusAccepted),
-			Assurance: ir.AssuranceFormalKernel,
-			Signature: &ir.AttestationSig{
-				PubkeyFingerprint: "abcd1234abcd1234",
-				Algorithm:         "ed25519",
-				Value:             "c2lnbmF0dXJl",
-			},
-		},
+
+	// Generate a real key pair, save the public key to a temp keysDir.
+	keysDir := t.TempDir()
+	key, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
 	}
+	if err := key.SavePublic(filepath.Join(keysDir, "test.pub")); err != nil {
+		t.Fatalf("SavePublic: %v", err)
+	}
+
+	// Build an attestation and sign it with the real private key.
+	att := &ir.Attestation{
+		ClaimID:   "c1",
+		Outcome:   string(ir.StatusAccepted),
+		Assurance: ir.AssuranceFormalKernel,
+	}
+	sig, err := key.Sign(att)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	att.Signature = &ir.AttestationSig{
+		PubkeyFingerprint: sig.PubkeyFingerprint,
+		Algorithm:         sig.Algorithm,
+		Value:             sig.Value,
+	}
+
+	g := coverBuildGraph(t, "c1")
+	atts := map[string]*ir.Attestation{"c1": att}
 	pol := policy.ReleasePolicy{
 		Version:                   "v1",
 		RequireSignedAttestations: true,
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, keysDir)
 	// With RequireSignedAttestations, we get 5 conditions.
 	c05 := results[4]
 	if c05.ID != release.CondAttestationSignatures {
@@ -329,7 +348,7 @@ func TestC05_Unsigned(t *testing.T) {
 		Version:                   "v1",
 		RequireSignedAttestations: true,
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	c05 := results[4]
 	if c05.Passed {
 		t.Error("C05 should fail when attestation has no signature")
@@ -351,7 +370,7 @@ func TestC05_NotActivatedWithoutPolicy(t *testing.T) {
 		Version: "v1",
 		// RequireSignedAttestations is false (default) — C05 should not appear.
 	}
-	results := release.EvaluateConditions(g, atts, pol)
+	results := release.EvaluateConditions(g, atts, pol, "")
 	for _, r := range results {
 		if r.ID == release.CondAttestationSignatures {
 			t.Error("C05 should not be evaluated when RequireSignedAttestations is false")
@@ -407,8 +426,10 @@ func TestBuildClaimSummary(t *testing.T) {
 	}
 	atts := map[string]*ir.Attestation{
 		"a": {ClaimID: "a", Outcome: string(ir.StatusAccepted), Assurance: ir.AssuranceFormalKernel,
-			SelfDigest: "sha256:a", StartFreshness: "sha256:sa", EndFreshness: "sha256:ea"},
-		"b": {ClaimID: "b", Outcome: string(ir.StatusRejected), Assurance: ir.AssuranceFormalKernel},
+			SelfDigest: "sha256:a", StartFreshness: "sha256:sa", EndFreshness: "sha256:ea",
+			Checker: ir.CheckerIdentity{ProtocolVersion: 2}},
+		"b": {ClaimID: "b", Outcome: string(ir.StatusRejected), Assurance: ir.AssuranceFormalKernel,
+			Checker: ir.CheckerIdentity{ProtocolVersion: 2}},
 		// c has no attestation → open
 	}
 	pol := policy.ReleasePolicy{Version: "v1", Target: "a"}

@@ -169,9 +169,10 @@ func TestAllObligationsPass_OneFail(t *testing.T) {
 func TestAllObligationsPass_Empty(t *testing.T) {
 	t.Parallel()
 	out := v2.CheckerOutputV2{ProtocolVersion: v2.ProtocolVersion, ClaimID: "x"}
-	// Empty obligations → vacuously true (ValidateOutput would catch this as EMPTY).
-	if !v2.AllObligationsPass(out) {
-		t.Error("empty obligation list should vacuously pass AllObligationsPass")
+	// Empty obligations → false (T-M31-P09: empty results cannot constitute a pass).
+	// ValidateOutput would also reject this as OBLIGATION_EMPTY if expected set is non-nil.
+	if v2.AllObligationsPass(out) {
+		t.Error("empty obligation list should return false (T-M31-P09: cannot vacuously pass)")
 	}
 }
 

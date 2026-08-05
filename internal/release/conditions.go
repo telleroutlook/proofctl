@@ -3,11 +3,15 @@ package release
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/telleroutlook/proofctl/internal/dag"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/policy"
+	"github.com/telleroutlook/proofctl/internal/signing"
 )
 
 // ConditionID identifies a release condition.
@@ -46,6 +50,7 @@ func EvaluateConditions(
 	graph *dag.DAG,
 	attestations map[string]*ir.Attestation,
 	pol policy.ReleasePolicy,
+	keysDir string,
 ) []ConditionResult {
 	results := make([]ConditionResult, 0, 9+len(pol.RequiredMetadataKeys))
 	results = append(results, checkC01GlobalStatus(graph, attestations))
@@ -53,7 +58,7 @@ func EvaluateConditions(
 	results = append(results, checkC03AssurancesAllowed(attestations, pol))
 	results = append(results, checkC04ReplayConsistency(graph, attestations))
 	if pol.RequireSignedAttestations {
-		results = append(results, checkC05AttestationSignatures(attestations))
+		results = append(results, checkC05AttestationSignatures(attestations, keysDir))
 	}
 	if len(pol.AllowedMetadataValues) > 0 {
 		results = append(results, checkC06MetadataValues(attestations, pol.AllowedMetadataValues))
@@ -240,23 +245,73 @@ func checkMetadataKey(attestations map[string]*ir.Attestation, key string) Condi
 	return ConditionResult{ID: id, Passed: true}
 }
 
-// checkC05AttestationSignatures verifies that every attestation carries a signature.
-// Unsigned attestations fail this condition when policy.RequireSignedAttestations is true.
-func checkC05AttestationSignatures(attestations map[string]*ir.Attestation) ConditionResult {
+// checkC05AttestationSignatures verifies that every attestation carries a valid
+// Ed25519 signature. Unsigned attestations are collected separately; signed
+// attestations are cryptographically verified against public keys in keysDir.
+func checkC05AttestationSignatures(attestations map[string]*ir.Attestation, keysDir string) ConditionResult {
+	// Load all public keys from keysDir once.
+	pubKeys := loadPubKeys(keysDir)
+
 	var unsigned []string
+	var invalid []string
 	for id, att := range attestations {
 		if att.Signature == nil || att.Signature.Value == "" {
 			unsigned = append(unsigned, id)
+			continue
+		}
+		sigObj := signing.Signature{
+			PubkeyFingerprint: att.Signature.PubkeyFingerprint,
+			Algorithm:         att.Signature.Algorithm,
+			Value:             att.Signature.Value,
+		}
+		key, ok := pubKeys[att.Signature.PubkeyFingerprint]
+		if !ok {
+			invalid = append(invalid, fmt.Sprintf("%s (unknown key %s)", id, att.Signature.PubkeyFingerprint))
+			continue
+		}
+		if err := signing.Verify(key, att, sigObj); err != nil {
+			invalid = append(invalid, fmt.Sprintf("%s (%v)", id, err))
 		}
 	}
+
+	var blockerParts []string
 	if len(unsigned) > 0 {
+		sort.Strings(unsigned)
+		blockerParts = append(blockerParts, "unsigned: "+strings.Join(unsigned, ", "))
+	}
+	if len(invalid) > 0 {
+		sort.Strings(invalid)
+		blockerParts = append(blockerParts, "SIGNATURE_INVALID: "+strings.Join(invalid, "; "))
+	}
+	if len(blockerParts) > 0 {
 		return ConditionResult{
 			ID:      CondAttestationSignatures,
 			Passed:  false,
-			Blocker: "C05: unsigned attestations: " + strings.Join(unsigned, ", "),
+			Blocker: "C05: " + strings.Join(blockerParts, "; "),
 		}
 	}
 	return ConditionResult{ID: CondAttestationSignatures, Passed: true}
+}
+
+// loadPubKeys loads all *.pub files from keysDir and returns a map from
+// fingerprint to *signing.Key. Errors loading individual keys are silently skipped.
+func loadPubKeys(keysDir string) map[string]*signing.Key {
+	keys := make(map[string]*signing.Key)
+	entries, err := os.ReadDir(keysDir)
+	if err != nil {
+		return keys
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pub") {
+			continue
+		}
+		key, loadErr := signing.LoadPublic(filepath.Join(keysDir, e.Name()))
+		if loadErr != nil {
+			continue
+		}
+		keys[key.ID] = key
+	}
+	return keys
 }
 
 // checkC06MetadataValues enforces allowed_metadata_values: for each constrained key,

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/telleroutlook/proofctl/internal/dag"
+	"github.com/telleroutlook/proofctl/internal/errors"
 	"github.com/telleroutlook/proofctl/internal/ir"
 	"github.com/telleroutlook/proofctl/internal/policy"
 	"github.com/telleroutlook/proofctl/internal/status"
@@ -46,6 +47,7 @@ type ClaimSummary struct {
 type Gate struct {
 	OutputDir   string
 	ProjectRoot string // if non-empty, release-manifest.json is written here on success
+	KeysDir     string // directory containing *.pub files for C05 signature verification
 }
 
 // checkResult holds the outcome of the shared internal check.
@@ -63,6 +65,18 @@ func (g *Gate) check(
 	attestations map[string]*ir.Attestation,
 	pol policy.ReleasePolicy,
 ) checkResult {
+	// T-M31-1: reject any v1 attestation — they are not eligible for release.
+	for claimID, att := range attestations {
+		if att.Checker.ProtocolVersion != 2 {
+			return checkResult{
+				pass:     false,
+				blockers: []string{fmt.Sprintf("%s: claim %q uses v1 attestation (protocol_version=%d): %s", errors.CodeLegacyAttestation, claimID, att.Checker.ProtocolVersion, "migrate to v2 before release")},
+				statuses: map[string]ir.Status{},
+				defects:  map[string]string{},
+			}
+		}
+	}
+
 	statuses := status.Compute(graph, attestations)
 
 	// Fail-closed: any non-accepted claim blocks release.
@@ -88,7 +102,7 @@ func (g *Gate) check(
 	}
 
 	// Evaluate the 13 Weil release conditions.
-	condResults := EvaluateConditions(graph, attestations, pol)
+	condResults := EvaluateConditions(graph, attestations, pol, g.KeysDir)
 	blockers = append(blockers, Blockers(condResults)...)
 
 	return checkResult{

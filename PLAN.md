@@ -1382,6 +1382,314 @@ core 不新增任何 Metamath 硬编码。
 
 ---
 
+## Milestone 30 — 第二领域证明通用性（Canvas M6）✅
+
+### 完成产出（2026-08-05）
+
+- `domains/metamath/contracts/thm-lem.json` + `thm-main.json`：两个 ContractV2，全部通过 `proofctl contract lint`
+- `domains/metamath/policy-v2.json`：formal-kernel assurance，forbidden_runtimes + required_claims
+- `adapters/metamath/bridge.py`：完整 stdlib-only 实现，mm.theorem-exists + mm.proof-verifies 两个义务，exit 0/1/2/3
+- CI `domains-lint` job：包含 Metamath smoke test（init + compile）
+- core 无 Metamath 硬编码（adversarial generality_test.go 覆盖）
+
+---
+
+## Milestone 31 — Canvas P0：止血（fail-closed）
+
+**背景：** Canvas 审计（2026-08-04）代码核查确认以下缺陷全部属实且可直接伪造 released=true，
+必须在任何新功能之前修复。M24–M29 建立了 kernel/v2 骨架，但生产路径尚未接入。
+
+### 已核实的 P0 缺陷（全部需本 Milestone 修复）
+
+| 缺陷 | 代码位置 | 修复方向 |
+|---|---|---|
+| P0-01 | `gate.go:120-124` TODO；`status.go:28` 信任 att.Outcome | release 路径必须拒绝 v1 attestation，错误码 LEGACY_ATTESTATION_NOT_RELEASABLE |
+| P0-02 | `main.go:228-255` loadAttestations 不验签/不重算 | 加载时重算 self-digest；有签名则验签，失败则拒绝 |
+| P0-03 | `conditions.go:245-259` C05 只检查字段非空 | 调用 `signing.Verify()`，真正验证 Ed25519 签名 |
+| P0-04 | `proofverify main.go:141` `_ = trustRootPath` | trust root 必填；未提供则 exit 1；用它验证 manifest 签名 |
+| P0-07 | `verify.go:177-180` ContractDigest=""、ObligationIDs=nil | 从 Contract JSON 读取 obligation set，填入 CheckerInputV2 |
+| P0-08 | `verify.go:233` 传 nil；`validate.go:46-50` nil 即跳过 | 删除 nil 豁免；production 调用必须传真实 obligationIDs |
+| P0-09 | `AllObligationsPass` 对空 slice 返回 true | 空 ObligationResults 返回 false（`OBLIGATION_EMPTY`）|
+| P0-11 | `verify.go:430-483` 部分失败被已有成功掩盖 | firstErr 非 nil 必须阻断；每条 evidence 独立记录结果 |
+| P0-12 | `oci/runner.go` 返回 ErrNotImplemented | 直接删除/隔离 OCI runner 的"未实现"代码；不允许代码路径走到它 |
+
+### 具体任务
+
+**T-M31-1：v1 拒绝**
+- `gate.go`：在 `Release()`/`DryRun()` 开头遍历 attestations，发现 `ProtocolVersion != 2` 则返回
+  `proofErr.Newf(CodeLegacyAttestation, "v1 attestation for claim %q is not releasable; migrate to v2")`
+- `internal/errors/codes.go`：新增 `CodeLegacyAttestation`
+
+**T-M31-2：attestation 加载时完整性检查**
+- `loadAttestations`（`cmd/proofctl/main.go`）或新增 `internal/attestation/load.go`：
+  - 重算 `self_digest`，与文件字段比对，不一致则拒绝
+  - 若 `signature` 字段存在，调用 `signing.Verify()`，失败则拒绝
+  - 错误统一附带文件路径
+
+**T-M31-3：C05 真正验签**
+- `internal/release/conditions.go:checkC05AttestationSignatures`：
+  - 加载 `.proofctl/keys/*.pub`，找到与 `pubkey_fingerprint` 匹配的公钥
+  - 对 attestation canonical JSON 调用 `signing.Verify()`
+  - 无匹配公钥 / 验签失败 → blocker `SIGNATURE_INVALID`
+
+**T-M31-4：proofverify trust root 强制**
+- `cmd/proofverify/main.go`：删除 `_ = trustRootPath`
+  - 若 `--trust-root` 未提供或文件不存在 → exit 1 with `trust root required`
+  - 读取 trust root JSON（`{"keys": [{"id": "...", "pubkey": "...", "roles": [...]}]}`）
+  - 用 trust root 中的 release-authority key 验证 manifest 签名（若 manifest 有签名字段）
+  - 无 manifest 签名时 → fail-closed，exit 1
+
+**T-M31-5：obligation 接入生产路径**
+- `internal/verify/verify.go`：在 v2 路径中加载对应的 ContractV2 JSON（从 `domains/` 或 bundle）
+  - 提取 `obligations[*].id` → 填入 `CheckerInputV2.ObligationIDs`
+  - 传给 `protov2.ValidateOutput(outV2, claimID, obligationIDs)` — 删除 nil 传参
+- `pkg/protocol/v2/validate.go`：删除 `if expectedObligationIDs == nil { return nil }` 豁免
+- 新增 error code `OBLIGATION_EMPTY`：`AllObligationsPass` 对空 slice 返回 false
+
+**T-M31-6：多 evidence 原子失败**
+- `runCheckerAllEvidence`（`internal/verify/verify.go`）：
+  - 每条 evidence 独立保存 `(output, error)` 对
+  - 任意 `error != nil` 都必须使整个 claim 失败，不被 mergedOut 掩盖
+  - 修复后 INV-07 end-to-end 路径生效
+
+**T-M31-7：10 个端到端 exploit regression tests**
+- `testdata/adversarial/exploit_regression_test.go`（新文件）
+- 每个 test 直接调用 `proofctl release` 或 `proofverify bundle.verify` binary
+- 覆盖 Canvas §9 攻击验收表中的所有行：
+  - v1 outcome 篡改 → `LEGACY_ATTESTATION_NOT_RELEASABLE`
+  - 空 obligation_results → `OBLIGATION_EMPTY`
+  - missing/extra/duplicate obligation → exact-set error
+  - 签名字段存在但伪造 → `SIGNATURE_INVALID`
+  - 多 evidence 一项 timeout → BLOCKED
+  - native-dev attestation 进入 closure → C09 blocker
+
+### 出口闸门
+
+- Canvas §9 攻击验收表所有行对 CLI binary 返回稳定 blockers（exit 1 + 机器错误码）
+- P0-01 至 P0-11 的最小攻击样本全部得到 `released=false`
+- `go test ./... -race` 通过；staticcheck/golangci-lint 通过
+
+---
+
+## Milestone 32 — Canvas P1：闭合 v2 可信核
+
+**背景：** M31 止血后，建立完整的 BundleV2 布局和 proofverify 严格加载器，
+使"从空目录仅凭伪造 JSON 无法产生 released"。
+
+### 具体任务
+
+**T-M32-1：BundleV2 精确布局**
+- `internal/kernel/bundle/` 扩展：`Manifest` 必须包含所有语义成员
+  - graph、PolicyV2、每 claim ContractV2（`bundle/contracts/<claim-id>.json`）
+  - AttestationV2（`bundle/attestations/<claim-id>.json`）
+  - evidence descriptors / witness blobs（CAS content by digest）
+  - checker/runtime/toolchain identity records
+- `bundle/manifest.json`：所有成员的路径 + sha256（安全相对路径，禁止 `../`、绝对路径、重复）
+- `bundle/manifest.json` 包含 `signature` 字段（release-authority Ed25519 over canonical manifest）
+
+**T-M32-2：Manifest 签名与验证**
+- `internal/kernel/bundle/sign.go`：`SignManifest(manifest, privKey)` → 写入 `manifest.signature`
+- `proofctl bundle create`：用 `PROOFCTL_SIGNING_KEY` 对 manifest 签名
+- `proofverify`：加载 trust root，提取 release-authority pubkey，验证 manifest 签名
+  - 签名缺失或无效 → exit 1，`MANIFEST_SIGNATURE_INVALID`
+
+**T-M32-3：proofverify 严格加载器**
+- 按拓扑序对 bundle 中每个 claim 执行：
+  1. 验 manifest 成员 digest（已有，M29）
+  2. strict decode 所有成员（禁止 unknown fields）
+  3. 从 bundle 当前内容计算 identity closure（`kernel/identity.Compute()`）
+  4. 验 attestation self-digest、签名与 key authorization
+  5. 对照 ContractV2 验 obligation exact set、evidence-used、runtime class
+  6. 由依赖状态推导 root state（`kernel/derive`）
+  7. 仅 root 达到 policy 要求时输出 released
+
+**T-M32-4：JSON 全量严格解析**
+- 所有 bundle 成员加载使用 `json.NewDecoder` + `DisallowUnknownFields()`
+- duplicate key → 拒绝（使用 `encoding/json` strict 模式或 third-party）
+- trailing data、错误 enum → 拒绝
+
+**T-M32-5：PolicyV2 完整 schema 与 loader**
+- `internal/kernel/policy/` 扩展：PolicyV2 strict loader
+  - key roles（release-authority、checker-signer、reviewer）
+  - claim kind / runtime / assurance authorization
+- `domains/*/policy-v2.json` 全部迁移为真正的 PolicyV2 格式
+- `proofverify` 从 bundle 加载 PolicyV2（而非仅 v1 policy）
+
+**T-M32-6：manifest canonicalization 规范与 test vectors**
+- `docs/ADR/ADR-008-bundle-manifest-canonicalization.md`
+- 至少 5 个 test vectors 覆盖：字段排序、Unicode、空成员集合
+- Python 参考实现（`adapters/cap/verify_manifest.py`）与 Go 实现结果一致
+
+### 出口闸门
+
+- 从空目录仅凭伪造 JSON 无法产生 released（regression test 覆盖）
+- 对 bundle 任意语义字节的修改导致 deterministic blocker
+- 外部 trust root 替换（使用未知 key）必然 `MANIFEST_SIGNATURE_INVALID`
+
+---
+
+## Milestone 33 — Canvas P2：Weil 义务接入真实 pipeline
+
+**背景：** M28 已建立 D1–D18 ContractV2，但 P0-07/P0-08/P0-10 确认
+这些 Contract 在生产路径是旁路文件。本 Milestone 把它们真正接入 checker pipeline。
+
+### 具体任务
+
+**T-M33-1：CAP bridge 修复（P1-01 + P1-02）**
+- `adapters/cap/bridge.py`：
+  - 输出字段改为 `id`（而非 `obligation_id`），与 Go v2 `ObligationResult.ID` 对齐
+  - 只使用 stdin 中 `obligation_ids` 字段的 ID 集合（不从 certificate 自报 obligations）
+  - 删除 `metadata/resources/explanation` 等 Go v2 未定义字段
+  - 回显 `claim_id`、`checker_digest`（从 `BRIDGE_CHECKER` 计算）、`evidence_digests`（实际读取集合）
+  - `evidence_used` 必须是实际读取文件的 digest 集合
+
+**T-M33-2：checker 输出关键绑定字段 kernel 校验（P0-10）**
+- `internal/kernel/attestation/validate.go`（或新 `verify_closure.go`）：
+  - 比较 `input_closure` 字段与当前计算的 `identity.Compute()` 结果
+  - 比较 `checker_digest` 与 graph.json 中记录的 `checker_digest`
+  - 比较 `evidence_used` 与 checkerInput 中声明的 evidence set
+  - 任一缺失或不一致 → `INPUT_CLOSURE_MISMATCH` / `EVIDENCE_SET_MISMATCH`
+
+**T-M33-3：18 个 Weil Contract 使用真实 evidence**
+- D1–D18 每个 ContractV2 补充：
+  - 真实 `evidence_roles`（primary certificate、odd sector、even sector 等实际文件角色）
+  - 真实 `schema_digest`（certificate JSON schema 文件的 sha256）
+  - `replay_profile`（`from_scratch` 或 `self_consistency`）
+  - `dependency_minimum_state`（所依赖 claim 的最低状态要求）
+- 使用 `proofctl pin checker --schema` 填入真实 schema_digest
+
+**T-M33-4：Weil checker 最低重算覆盖（P2 §4 中列出的 9 项）**
+- `checker/check_certificate.py` 或新增 `checker/verify_kernel.py`：
+  - 严格 schema/version 验证（拒绝未知版本）
+  - 外向舍入与区间端点独立重算
+  - 积分及解析余项独立重算
+  - Path A/B 原语和交集验证
+  - 矩阵逐项重建
+  - interval LDLᵀ 与每个 pivot 正性
+  - odd/even sector 完备性
+  - Path A/B 独立性与禁止共享产物
+  - 最终半径结论从上游见证重新推出
+- Producer 自报的积分区间、误差、margin 一律视为 untrusted hint，checker 从原始 witness 重算后比较
+
+**T-M33-5：逐义务 typed witness digest**
+- 每个 `ObligationResult` 新增 `witness_digest` 字段（可选）
+- Weil checker 对每个义务输出计算该义务所用 witness 数据的 sha256
+- 使离线审计可定位"哪一步、哪个输入、哪个算法"产生结论
+
+**T-M33-6：P2 出口测试**
+- 对每个 Weil certificate 的关键数值做单点篡改（值、matrix entry、pivot、sector、dependency digest、obligation ID）
+- 必须在对应义务处失败，不只在总 digest 处失败
+- 覆盖 Canvas §9 攻击验收表中 Weil 特定行
+
+### 出口闸门
+
+- 对任一 Weil certificate 的关键数值单点篡改 → 对应义务 blocker
+- CAP bridge conformance test：obligation ID 格式、evidence_used 精确集合、input closure 回显
+- `go test ./...` 通过
+
+---
+
+## Milestone 34 — Canvas P3：生产隔离与多域合规
+
+**背景：** OCI runner 存在但返回 ErrNotImplemented（P0-12）；
+native-dev 除 C09 policy 之外没有硬性禁止；多个域缺少 conformance vectors。
+
+### 具体任务
+
+**T-M34-1：OCI runner 真实实现**
+- `internal/runtime/oci/runner.go`：实现 `Run()`
+  - digest-pinned image（`sha256:<digest>`）
+  - `network: none`（`--network none`）
+  - read-only rootfs（`--read-only`）
+  - 只读 CAS mounts（`-v cas:/cas:ro`）
+  - 固定 locale/timezone（`LC_ALL=C`、`TZ=UTC`）
+  - CPU/内存/超时限制（从 `ir.Runtime` 读取）
+- `internal/ir/types.go`：`Runtime` 新增 `OCI` 子结构（image, cpu_quota, mem_limit_mb）
+
+**T-M34-2：native-dev 硬性禁止（不依赖 policy 列表）**
+- `internal/kernel/derive/derive.go`：当 `runtime.class == "native-dev"` 时
+  attestation 最高可达 `LOCALLY_VERIFIED`，永远不进入 `GLOBALLY_VERIFIED` 或 `RELEASED`
+- 这条规则在 kernel 层硬编码，不能被 policy 覆盖
+
+**T-M34-3：domain adapter conformance suite**
+- `testdata/conformance/` 目录：每个已支持域的 conformance test vectors
+  - 合法 checker output → expected ObligationResults
+  - 非法 checker output → expected error code
+- 覆盖：cap、lrat、qmd、metamath、lean（stub ok）、coq（stub ok）、smt、isabelle
+- CI 新增 `domains-conformance` job
+
+**T-M34-4：真实 mutation engine**
+- `proofctl mutate --mode dynamic`：
+  - 自动对 bundle/contract/attestation/evidence 做随机字节/字段变换
+  - 每个变换必须导致 `proofverify` exit 1
+  - 与固定 fixtures 区分：`--mode static`（现有）vs `--mode dynamic`
+
+**T-M34-5：fuzz 扩展**
+- `internal/kernel/` 所有包增加 FuzzXxx 函数（policy、attestation、derive、contract）
+- `pkg/protocol/v2/validate.go` fuzz
+- CI 新增 30 秒 fuzz corpus regression（`go test -run=FuzzXxx/corpus ./...`）
+
+**T-M34-6：可复现 SBOM 与 SLSA provenance**
+- `release.yml`：构建时生成 SBOM（`cyclonedx-gomod`）和 SLSA Build L2 provenance（`slsa-github-generator`）
+- release binary 与 trust root 分离分发（binary 在 GitHub Releases，trust root 在独立 repo）
+
+**T-M34-7：双环境离线复核**
+- `docs/OFFLINE_VERIFICATION.md`：两台独立干净环境、相同 bundle 与 trust root 的验证流程
+- CI 增加一个 `verify-bundle` job：下载 release bundle，使用 `proofverify` 独立验证，断言结果字节稳定
+
+### 出口闸门
+
+- 两台独立干净环境相同 bundle + trust root 得到字节稳定的 VerificationResult
+- 断网、无源码、无缓存仍可运行 `proofverify bundle.verify`
+- OCI runner 完整实现，integration test 覆盖 network-none + read-only 行为
+- native-dev 在 kernel 层被拒绝（无论 policy 如何设置）
+
+---
+
+## Milestone 35 — 治理文档与 DoD 闸门
+
+**背景：** Canvas §11–§12 列出了仓库治理要求和最终完成定义（DoD），
+这些必须转为可机器验证的条件，而非手写"已保证"的文档。
+
+### 具体任务
+
+**T-M35-1：`SECURITY-INVARIANTS.md`**
+- 把 Canvas §7 的 12 条不变量映射到唯一生产调用点和端到端测试名
+- 每条格式：`INV-XX | 描述 | 代码位置:行号 | 对应 test 函数名`
+
+**T-M35-2：PR checklist**
+- `.github/PULL_REQUEST_TEMPLATE.md` 新增三个必填问题：
+  1. 改变了哪条不变量？
+  2. 是否新增了信任输入？
+  3. 对应 mutation/exploit test 是什么？
+
+**T-M35-3：CI 四道强制门**
+- `build-lint`：go build / vet / gofmt / staticcheck / golangci-lint / govulncheck / race
+- `protocol-conformance`：schema conformance + bridge sync + domains-lint
+- `release-exploit-suite`：Canvas §9 攻击验收表 exploit tests（M31 T-M31-7）
+- `domain-mutation-suite`：所有 domains conformance vectors + dynamic mutation
+
+**T-M35-4：覆盖率强制阈值**
+- CI 新增覆盖率检查：`internal/kernel/` statement ≥95%、branch ≥90%
+- `internal/release/`、`pkg/protocol/v2/` statement ≥85%
+- 使用 `go test -coverprofile` + `go tool cover` 断言
+
+**T-M35-5：Canvas §12 DoD 机器核查**
+- `testdata/adversarial/dod_checklist_test.go`：
+  对 Canvas §12 每个 DoD 条目执行最小 binary-level 验证
+  - v1 attestation 永远不能贡献 release → exploit test
+  - 只有一个发布判定实现 → `go list -f '{{.Imports}}' ./internal/release` 不导入 proofverify 以外的 gate
+  - obligation exact set 在真实 checker path 生效 → end-to-end test
+  - 等等
+
+### 出口闸门
+
+- `SECURITY-INVARIANTS.md` 中每条 INV 有对应代码位置和 test 函数名
+- CI 四道门全部通过才允许 merge
+- Canvas §12 DoD checklist 中每个 `[ ]` 变为 `[x]` 并有机器链接
+
+---
+
 ## Canvas 不变量追踪（INV-01–INV-12）
 
 以下 12 个不变量必须有对应代码或测试，不得只是文档约定：

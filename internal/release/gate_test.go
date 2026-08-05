@@ -30,6 +30,7 @@ func makeTestGraph(t *testing.T) (*dag.DAG, map[string]*ir.Attestation) {
 			SelfDigest:     "sha256:aabbccdd00112233",
 			StartFreshness: "sha256:start1",
 			EndFreshness:   "sha256:end1",
+			Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
 			Metadata: map[string]string{
 				"cap_format_version":   "v2",
 				"digests_fresh":        "true",
@@ -49,6 +50,7 @@ func makeTestGraph(t *testing.T) (*dag.DAG, map[string]*ir.Attestation) {
 			SelfDigest:     "sha256:eeff99887766554433221100",
 			StartFreshness: "sha256:start2",
 			EndFreshness:   "sha256:end2",
+			Checker:        ir.CheckerIdentity{ProtocolVersion: 2},
 		},
 	}
 	return d, atts
@@ -359,18 +361,21 @@ func TestRelease_ShadowModeBlocked(t *testing.T) {
 			Outcome:     string(ir.StatusBlocked),
 			Assurance:   shadowAssurance,
 			BlockReason: "D4: kernel-bound expected primitive keys not matched; v1/v2 checker result conflict",
+			Checker:     ir.CheckerIdentity{ProtocolVersion: 2},
 		},
 		"lem-ab-intersection": {
 			ClaimID:     "lem-ab-intersection",
 			Outcome:     string(ir.StatusBlocked),
 			Assurance:   shadowAssurance,
 			BlockReason: "D8: Path A keys and Path B keys share no common primitives; intersection empty",
+			Checker:     ir.CheckerIdentity{ProtocolVersion: 2},
 		},
 		"thm-main-radius-030": {
 			ClaimID:     "thm-main-radius-030",
 			Outcome:     string(ir.StatusBlocked),
 			Assurance:   shadowAssurance,
 			BlockReason: "D18: thm-main-radius-030 blocked — D4 and D8 unresolved; no certified radius",
+			Checker:     ir.CheckerIdentity{ProtocolVersion: 2},
 		},
 	}
 	pol := policy.ReleasePolicy{

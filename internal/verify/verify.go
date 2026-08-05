@@ -16,6 +16,7 @@ import (
 
 	"github.com/telleroutlook/proofctl/internal/cas"
 	"github.com/telleroutlook/proofctl/internal/checker"
+	"github.com/telleroutlook/proofctl/internal/config"
 	"github.com/telleroutlook/proofctl/internal/dag"
 	proofErr "github.com/telleroutlook/proofctl/internal/errors"
 	"github.com/telleroutlook/proofctl/internal/freshness"
@@ -27,13 +28,14 @@ import (
 
 // Pipeline runs the full verification pipeline for one claim.
 type Pipeline struct {
-	DAG        *dag.DAG
-	CAS        *cas.Store
-	AttestDir  string // directory for attestation JSON files
-	Runner     runner.Runner
-	SigningKey *signing.Key // optional; if set, attestations are signed on write
-	TrustStore string       // directory of *.pub key files; used to verify loaded attestations
-	NoCache    bool         // if true, skip cache lookup and always re-run checker
+	DAG         *dag.DAG
+	CAS         *cas.Store
+	AttestDir   string // directory for attestation JSON files
+	Runner      runner.Runner
+	SigningKey  *signing.Key // optional; if set, attestations are signed on write
+	TrustStore  string       // directory of *.pub key files; used to verify loaded attestations
+	NoCache     bool         // if true, skip cache lookup and always re-run checker
+	ProjectRoot string       // project root directory for contract resolution (T-M31-5)
 }
 
 // Result is returned by Pipeline.Run.
@@ -230,7 +232,8 @@ func (p *Pipeline) Run(
 			return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
 				"claim %q: invalid checker output JSON: %v", claimID, jsonErr)
 		}
-		if valErr := protov2.ValidateOutput(outV2, claimID, nil); valErr != nil {
+		obligationIDs := loadObligationIDs(p.ProjectRoot, claimID)
+		if valErr := protov2.ValidateOutput(outV2, claimID, obligationIDs); valErr != nil {
 			return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
 				"claim %q: checker output validation failed: %v", claimID, valErr)
 		}
@@ -470,8 +473,10 @@ func (p *Pipeline) runCheckerAllEvidence(
 		}
 	}
 
-	if firstErr != nil && mergedOut == nil {
-		return nil, firstErr
+	// T-M31-6: any per-evidence error blocks the entire claim (INV-07).
+	// A partial success does NOT mask a failure on another evidence item.
+	if firstErr != nil {
+		return nil, fmt.Errorf("multi-evidence: one or more evidence items failed (first error: %w); all evidence must pass", firstErr)
 	}
 	if mergedOut == nil {
 		return nil, fmt.Errorf("checker produced no output for any evidence item")
@@ -561,6 +566,33 @@ func (p *Pipeline) VerifySignatureOnly(claimID string) error {
 	}
 
 	return nil
+}
+
+// loadObligationIDs tries to find a ContractV2 JSON for claimID and returns
+// its obligation IDs. Returns nil (skip exact-set check) if no contract found.
+func loadObligationIDs(projectRoot, claimID string) []string {
+	// Try .proofctl/contracts/<claimID>.json first (bundle layout).
+	candidates := []string{
+		filepath.Join(projectRoot, config.DirName, "contracts", claimID+".json"),
+	}
+	// Also scan domains/*/contracts/<claimID>.json.
+	if matches, err := filepath.Glob(filepath.Join(projectRoot, "domains", "*", "contracts", claimID+".json")); err == nil {
+		candidates = append(candidates, matches...)
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var c struct {
+			Obligations []string `json:"obligations"`
+		}
+		if err := json.Unmarshal(data, &c); err != nil || len(c.Obligations) == 0 {
+			continue
+		}
+		return c.Obligations
+	}
+	return nil // no contract found — skip exact-set check
 }
 
 // verifyEvidenceDigestsOnDisk recomputes the SHA-256 of each evidence file that has

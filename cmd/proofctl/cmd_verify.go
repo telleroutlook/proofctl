@@ -55,12 +55,13 @@ func cmdVerify(args []string, useJSON bool) {
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
 	nr := &runner.NativeRunner{ProjectRoot: root}
 	pipe := &verify.Pipeline{
-		DAG:        g,
-		CAS:        store,
-		AttestDir:  attestDir,
-		Runner:     nr,
-		SigningKey: loadSigningKeyIfSet(),
-		TrustStore: filepath.Join(root, config.DirName, "keys"),
+		DAG:         g,
+		CAS:         store,
+		AttestDir:   attestDir,
+		Runner:      nr,
+		SigningKey:  loadSigningKeyIfSet(),
+		TrustStore:  filepath.Join(root, config.DirName, "keys"),
+		ProjectRoot: root,
 	}
 
 	type verifyResult struct {
@@ -429,10 +430,11 @@ func cmdVerifySignatureOnly(positional []string, projectMode bool, useJSON bool)
 
 	trustStore := filepath.Join(root, config.DirName, "keys")
 	pipe := &verify.Pipeline{
-		DAG:        g,
-		CAS:        store,
-		AttestDir:  filepath.Join(root, config.DirName, config.AttestDir),
-		TrustStore: trustStore,
+		DAG:         g,
+		CAS:         store,
+		AttestDir:   filepath.Join(root, config.DirName, config.AttestDir),
+		TrustStore:  trustStore,
+		ProjectRoot: root,
 	}
 
 	type sigResult struct {
