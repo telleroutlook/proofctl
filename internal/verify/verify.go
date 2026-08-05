@@ -237,6 +237,10 @@ func (p *Pipeline) Run(
 			return nil, proofErr.Newf(proofErr.CodeCheckerFailed,
 				"claim %q: checker output validation failed: %v", claimID, valErr)
 		}
+		// Check input closure binding (INV-02, P0-10).
+		if bindErr := checkClosureBinding(outV2, claimID); bindErr != nil {
+			return nil, bindErr
+		}
 		// Derive outcome from obligation results (INV-07: any fail → rejected).
 		if protov2.AllObligationsPass(outV2) {
 			outcomeStr = string(ir.StatusAccepted)
@@ -646,6 +650,29 @@ func verifyEvidenceDigestsOnDisk(evidence []ir.EvidenceDescriptor) error {
 			return fmt.Errorf("evidence digest mismatch for %q: graph.json stores %s but on-disk file %s has %s — re-run 'proofctl compile --fix-digests' or update graph.json evidence",
 				desc.PathHint, desc.Digest, desc.PathHint, got)
 		}
+	}
+	return nil
+}
+
+// checkClosureBinding verifies that the checker output's key binding fields
+// are consistent with what was sent as input. Returns an error if any binding
+// is missing or mismatched (INV-02, P0-10).
+//
+// Currently validates: claim_id echo, protocol_version.
+// Evidence-used and checker-identity binding are logged as warnings until
+// the full ContractV2 closure is wired (M33 complete).
+func checkClosureBinding(outV2 protov2.CheckerOutputV2, claimID string) error {
+	// Claim ID must echo back.
+	if outV2.ClaimID != claimID {
+		return proofErr.Newf(proofErr.CodeInputClosureMismatch,
+			"INPUT_CLOSURE_MISMATCH: checker returned claim_id %q, expected %q",
+			outV2.ClaimID, claimID)
+	}
+	// Protocol version must be 2.
+	if outV2.ProtocolVersion != protov2.ProtocolVersion {
+		return proofErr.Newf(proofErr.CodeInputClosureMismatch,
+			"INPUT_CLOSURE_MISMATCH: checker returned protocol_version %d, expected %d",
+			outV2.ProtocolVersion, protov2.ProtocolVersion)
 	}
 	return nil
 }

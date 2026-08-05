@@ -5,7 +5,10 @@
   "dependencies": [{"claim_id":"lem-d5-log-moments","required_state":"GLOBALLY_VERIFIED","statement_digest":"sha256:5555555555555555555555555555555555555555555555555555555555555555"}],
   "evidence": {
     "mode": "each",
-    "required": []
+    "required": [
+      {"role": "odd-sector-certificate", "media_type": "application/json", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000071"},
+      {"role": "even-sector-certificate", "media_type": "application/json", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000072"}
+    ]
   },
   "checker": {
     "protocol": "proofctl-checker/v2",
@@ -24,5 +27,6 @@
     "semantic": "required",
     "byte_exact": "not_required"
   },
+  "replay_profile": "from_scratch",
   "independence": {}
 }

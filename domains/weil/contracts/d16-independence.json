@@ -5,7 +5,9 @@
   "dependencies": [{"claim_id":"lem-d14-path-a-remainder","required_state":"GLOBALLY_VERIFIED","statement_digest":"sha256:eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555"},{"claim_id":"lem-d15-path-b-remainder","required_state":"GLOBALLY_VERIFIED","statement_digest":"sha256:ffff6666ffff6666ffff6666ffff6666ffff6666ffff6666ffff6666ffff6666"}],
   "evidence": {
     "mode": "joint",
-    "required": []
+    "required": [
+      {"role": "independence-certificate", "media_type": "application/json", "digest": "sha256:000000000000000000000000000000000000000000000000000000000000000f"}
+    ]
   },
   "checker": {
     "protocol": "proofctl-checker/v2",
@@ -24,5 +26,6 @@
     "semantic": "required",
     "byte_exact": "not_required"
   },
+  "replay_profile": "semantic",
   "independence": {}
 }

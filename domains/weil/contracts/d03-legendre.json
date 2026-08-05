@@ -5,7 +5,9 @@
   "dependencies": [{"claim_id":"lem-d2-weil-reduction","required_state":"GLOBALLY_VERIFIED","statement_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222"}],
   "evidence": {
     "mode": "joint",
-    "required": []
+    "required": [
+      {"role": "primary-certificate", "media_type": "application/json", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000003"}
+    ]
   },
   "checker": {
     "protocol": "proofctl-checker/v2",
@@ -24,5 +26,6 @@
     "semantic": "required",
     "byte_exact": "not_required"
   },
+  "replay_profile": "semantic",
   "independence": {}
 }

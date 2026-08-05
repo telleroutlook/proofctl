@@ -67,22 +67,26 @@ def _read_input() -> dict:
 
 
 def _out_obligations(claim_id: str, obligation_ids: list, verdict: str,
-                     explanation: str = "", metadata: dict = None) -> dict:
+                     explanation: str = "", metadata: dict = None,
+                     evidence_used: list = None) -> dict:
     """Build a protocol v2 CheckerOutput with obligation_results."""
     results = []
     for obl_id in obligation_ids:
-        r = {"obligation_id": obl_id, "verdict": verdict}
+        r = {"id": obl_id, "verdict": verdict}
         if explanation:
             r["explanation"] = explanation
         if metadata:
             r["metadata"] = metadata
         results.append(r)
-    return {
+    out = {
         "protocol_version": PROTOCOL_VERSION,
         "claim_id": claim_id,
         "obligation_results": results,
         "resources": _EMPTY_RESOURCES,
     }
+    if evidence_used:
+        out["evidence_used"] = evidence_used
+    return out
 
 
 def _out_error(claim_id: str, error_code: str, explanation: str = "") -> dict:
@@ -131,16 +135,26 @@ def _read_cert_field(cert_data: dict, field: str) -> str:
     return str(v) if v else ""
 
 
-def _get_obligations(cert_data: dict, claim_id: str) -> list:
+def _get_obligations(inp: dict, cert_data: dict) -> list:
     """Return the obligation IDs to use for this check run.
 
-    Reads the "obligations" list from the certificate JSON if present and
-    non-empty; otherwise returns _DEFAULT_OBLIGATIONS. The bridge does not
-    hard-code claim-specific IDs — each certificate declares its own.
+    Priority:
+    1. inp["obligation_ids"] — the ContractV2-driven exact set from proofctl (authoritative)
+    2. cert_data["obligations"] — producer self-report (fallback for legacy certs)
+    3. _DEFAULT_OBLIGATIONS — hard-coded default
+
+    The input obligation_ids is the only authoritative source; a producer
+    cannot shrink the set by omitting obligations from the certificate.
     """
-    obls = cert_data.get("obligations", [])
-    if isinstance(obls, list) and obls:
-        return [str(o) for o in obls]
+    # 1. Authoritative: obligation_ids from CheckerInputV2
+    inp_obls = inp.get("obligation_ids", [])
+    if isinstance(inp_obls, list) and inp_obls:
+        return [str(o) for o in inp_obls]
+    # 2. Fallback: certificate self-report (legacy path)
+    cert_obls = cert_data.get("obligations", [])
+    if isinstance(cert_obls, list) and cert_obls:
+        return [str(o) for o in cert_obls]
+    # 3. Hard-coded default
     return list(_DEFAULT_OBLIGATIONS)
 
 
@@ -196,7 +210,17 @@ def main() -> None:
 
     cert_path = _find_certificate(evidence)
     cert_data = _read_cert_json(cert_path) if cert_path is not None else {}
-    obligation_ids = _get_obligations(cert_data, claim_id)
+    obligation_ids = _get_obligations(inp, cert_data)
+
+    # Collect evidence digests actually used.
+    evidence_digests = []
+    if cert_path is not None:
+        for item in evidence:
+            hint = item.get("local_path", "") or item.get("path_hint", "")
+            if hint and str(cert_path) in hint:
+                d = item.get("digest", "")
+                if d:
+                    evidence_digests.append(d)
 
     if cert_path is None:
         json.dump(
@@ -262,7 +286,8 @@ def main() -> None:
         metadata["even_sector_passes"] = "true"
 
     json.dump(
-        _out_obligations(claim_id, obligation_ids, "pass", metadata=metadata),
+        _out_obligations(claim_id, obligation_ids, "pass", metadata=metadata,
+                         evidence_used=evidence_digests),
         sys.stdout,
     )
     sys.exit(0)

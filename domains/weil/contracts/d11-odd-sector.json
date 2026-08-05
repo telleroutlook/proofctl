@@ -5,7 +5,9 @@
   "dependencies": [{"claim_id":"lem-path-a-primitives","required_state":"GLOBALLY_VERIFIED","statement_digest":"sha256:6666666666666666666666666666666666666666666666666666666666666666"}],
   "evidence": {
     "mode": "joint",
-    "required": []
+    "required": [
+      {"role": "odd-sector-certificate", "media_type": "application/json", "digest": "sha256:000000000000000000000000000000000000000000000000000000000000000b"}
+    ]
   },
   "checker": {
     "protocol": "proofctl-checker/v2",
@@ -24,5 +26,6 @@
     "semantic": "required",
     "byte_exact": "not_required"
   },
+  "replay_profile": "from_scratch",
   "independence": {}
 }
