@@ -105,7 +105,7 @@ func printStatus(verbose, useJSON bool) {
 		type statusOutput struct {
 			Claims            map[string]claimStatusEntry `json:"claims"`
 			Summary           summaryEntry                `json:"summary"`
-			ReleaseTarget     interface{}                 `json:"release_target"`
+			ReleaseTarget     any                         `json:"release_target"`
 			UnverifiedDigests []string                    `json:"unverified_digests,omitempty"`
 		}
 		var unverified []string
@@ -261,7 +261,7 @@ func cmdStatusWatch(verbose, useJSON bool) {
 
 	// Try to add the graph source file.
 	if cfg, loadErr := config.Load(root); loadErr == nil && cfg.GraphSource != "" {
-		watched = append(watched, filepath.Join(root, cfg.GraphSource))
+		watched = append(watched, filepath.Join(root, config.DirName, cfg.GraphSource))
 	}
 
 	lastSig := watchSignature(watched)
@@ -291,7 +291,7 @@ func watchSignature(paths []string) string {
 	for _, p := range paths {
 		info, err := os.Stat(p)
 		if err != nil {
-			sb.WriteString(p + ":err\n")
+			fmt.Fprintf(&sb, "%s:err\n", p)
 			continue
 		}
 		fmt.Fprintf(&sb, "%s:%d:%d\n", p, info.ModTime().UnixNano(), info.Size())

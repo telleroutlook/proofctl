@@ -129,9 +129,9 @@ func buildSuggestedFix(claimID string, claimStatus ir.Status, att *ir.Attestatio
 		if len(evidenceArgs) > 0 {
 			// Prefer replay if evidence digests are known.
 			var replayCmd strings.Builder
-			replayCmd.WriteString("proofctl replay --claim " + claimID)
+			fmt.Fprintf(&replayCmd, "proofctl replay --claim %s", claimID)
 			for _, e := range evidenceArgs {
-				replayCmd.WriteString(" \\\n    --evidence " + e.digest + " --generator \"" + e.generator + "\"")
+				fmt.Fprintf(&replayCmd, " \\\n    --evidence %s --generator %q", e.digest, e.generator)
 			}
 			if len(evidenceArgs) > 0 && evidenceArgs[0].generator == "" {
 				// No generator known — suggest check instead.
@@ -158,7 +158,7 @@ type evidenceArg struct {
 }
 
 // buildEvidenceArgs extracts evidence digests and generator commands for a claim from the graph.
-func buildEvidenceArgs(claimID string, c *ir.Claim, pg *ir.ProofGraph) []evidenceArg {
+func buildEvidenceArgs(_ string, c *ir.Claim, pg *ir.ProofGraph) []evidenceArg {
 	if pg == nil {
 		return nil
 	}

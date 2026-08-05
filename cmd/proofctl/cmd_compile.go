@@ -46,7 +46,9 @@ func cmdCompile(args []string, useJSON bool) {
 		if err != nil {
 			die(useJSON, errors.CodeInvalidInput, err.Error())
 		}
-		pg, err := compileContractDir(srcFile, useJSON)
+		// Load existing graph.json so we can preserve statement.text and checker_policy.
+		existing := loadCompiledGraph(root)
+		pg, err := compileContractDir(srcFile, existing, useJSON)
 		if err != nil {
 			die(useJSON, errors.CodeInvalidInput, err.Error())
 		}
@@ -240,7 +242,17 @@ const zeroDigest = "sha256:00000000000000000000000000000000000000000000000000000
 // compileContractDir reads all ContractV2 JSON files from dir and converts
 // them into a ProofGraph. Each contract becomes one Claim; dependency edges
 // are derived from contract.Dependencies[].claim_id.
-func compileContractDir(dir string, useJSON bool) (*ir.ProofGraph, error) {
+// existing, if non-nil, is used to preserve statement.text and checker_policy
+// from the current graph.json so they are not lost on re-compile.
+func compileContractDir(dir string, existing *ir.ProofGraph, useJSON bool) (*ir.ProofGraph, error) {
+	// Index existing claims by ID to preserve text and checker_policy.
+	existingByID := map[string]ir.Claim{}
+	if existing != nil {
+		for _, cl := range existing.Claims {
+			existingByID[cl.ID] = cl
+		}
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("contract-dir: cannot read directory %q: %w", dir, err)
@@ -274,14 +286,24 @@ func compileContractDir(dir string, useJSON bool) (*ir.ProofGraph, error) {
 			deps = append(deps, d.ClaimID)
 		}
 
+		// Preserve statement.text and checker_policy from the existing graph if present.
+		stmtText := ""
+		checkerPolicy := ""
+		if ex, ok := existingByID[c.ClaimID]; ok {
+			stmtText = ex.Statement.Text
+			checkerPolicy = ex.CheckerPolicy
+		}
+
 		pg.Claims = append(pg.Claims, ir.Claim{
 			ID:   c.ClaimID,
 			Kind: "theorem",
 			Statement: ir.Statement{
+				Text:   stmtText,
 				Digest: c.StatementDigest,
 			},
 			DependsOn:         deps,
 			RequiredAssurance: c.Assurance.Required,
+			CheckerPolicy:     checkerPolicy,
 		})
 	}
 

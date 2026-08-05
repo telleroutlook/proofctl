@@ -156,7 +156,7 @@ func cmdCheck(args []string, useJSON bool) {
 // a pytest-style summary at the end.
 func cmdCheckAll(pipe *verify.Pipeline, g interface {
 	Claims() []*ir.Claim
-}, pg *ir.ProofGraph, root string, useJSON bool) {
+}, pg *ir.ProofGraph, _ string, useJSON bool) {
 	type checkResult struct {
 		ClaimID   string `json:"claim_id"`
 		Outcome   string `json:"outcome"`

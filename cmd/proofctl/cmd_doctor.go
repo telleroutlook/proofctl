@@ -92,8 +92,9 @@ func checkProofctlInPath() doctorCheck {
 	if err != nil {
 		return doctorCheck{
 			Name:   "proofctl-in-path",
-			OK:     false,
-			Detail: "proofctl not found in PATH",
+			OK:     true,
+			Warn:   true,
+			Detail: "proofctl not found in PATH (binary not yet installed system-wide)",
 			Fix:    "add the directory containing the proofctl binary to your PATH",
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/telleroutlook/proofctl/internal/cas"
+	"github.com/telleroutlook/proofctl/internal/compile"
 	"github.com/telleroutlook/proofctl/internal/config"
 	errors "github.com/telleroutlook/proofctl/internal/errors"
 	"github.com/telleroutlook/proofctl/internal/ir"
@@ -128,7 +129,25 @@ func cmdReplay(args []string, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, "replay: set --checker or BRIDGE_CHECKER")
 	}
 
-	root, _, _, attestations := loadProjectGraph(useJSON)
+	root, cfg, _, attestations := loadProjectGraph(useJSON)
+
+	// Load ProofGraph to resolve checker identity for this claim.
+	var checkerIdentity ir.CheckerIdentity
+	if graphData, readErr := os.ReadFile(filepath.Join(root, config.DirName, cfg.GraphSource)); readErr == nil {
+		if pg, compErr := compile.Compile(graphData, compile.FormatJSON); compErr == nil {
+			for _, claim := range pg.Claims {
+				if claim.ID == *claimIDFlag {
+					for _, ch := range pg.Checkers {
+						if ch.ID == claim.CheckerPolicy {
+							checkerIdentity = ch
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
 	casRoot := filepath.Join(root, config.DirName, config.CASDir)
 	replayDate := time.Now().UTC().Format("2006-01-02")
 
@@ -162,12 +181,15 @@ func cmdReplay(args []string, useJSON bool) {
 		// --reuse-generated: use pre-generated cert from directory instead of running generator.
 		if *reuseGeneratedFlag != "" {
 			hexPart := strings.TrimPrefix(p.digest, "sha256:")
-			if len(hexPart) > 16 {
-				hexPart = hexPart[:16]
-			}
+			// Try full-length filename first, then fall back to 16-char prefix.
 			candidatePath := filepath.Join(*reuseGeneratedFlag, hexPart+".json")
-			if _, statErr := os.Stat(candidatePath); statErr == nil {
-				// Patch the generator to copy the pre-generated file.
+			if _, statErr := os.Stat(candidatePath); statErr != nil && len(hexPart) > 16 {
+				candidatePath = filepath.Join(*reuseGeneratedFlag, hexPart[:16]+".json")
+				if _, statErr2 := os.Stat(candidatePath); statErr2 != nil {
+					candidatePath = ""
+				}
+			}
+			if candidatePath != "" {
 				p.generator = "cp " + candidatePath + " {cert}"
 			}
 		}
@@ -313,6 +335,7 @@ func cmdReplay(args []string, useJSON bool) {
 		wallMillis := time.Since(replayStart).Milliseconds()
 		att := ir.Attestation{
 			ClaimID:        *claimIDFlag,
+			Checker:        checkerIdentity,
 			Outcome:        string(ir.StatusAccepted),
 			Assurance:      assurance,
 			ReplayMode:     "from_scratch",
@@ -567,24 +590,24 @@ func buildDigestMismatchReason(gotDigest, wantDigest, newCertPath, casRoot strin
 		allKeys[k] = true
 	}
 	changed := false
-	diff := ""
+	var diffBuf strings.Builder
 	for k := range allKeys {
 		oldV, inOld := oldInputs[k]
 		newV, inNew := newInputs[k]
 		switch {
 		case !inOld:
-			diff += fmt.Sprintf("\n    + %s: %s (added)", k, newV)
+			fmt.Fprintf(&diffBuf, "\n    + %s: %s (added)", k, newV)
 			changed = true
 		case !inNew:
-			diff += fmt.Sprintf("\n    - %s: %s (removed)", k, oldV)
+			fmt.Fprintf(&diffBuf, "\n    - %s: %s (removed)", k, oldV)
 			changed = true
 		case oldV != newV:
-			diff += fmt.Sprintf("\n    ~ %s\n        old: %s\n        new: %s", k, oldV, newV)
+			fmt.Fprintf(&diffBuf, "\n    ~ %s\n        old: %s\n        new: %s", k, oldV, newV)
 			changed = true
 		}
 	}
 	if changed {
-		msg += "\n  sha256_inputs changed (source files modified since last cert):" + diff
+		msg += "\n  sha256_inputs changed (source files modified since last cert):" + diffBuf.String()
 		msg += "\n  hint: use --semantic to accept checker-verified results regardless of digest"
 	} else {
 		msg += "\n  sha256_inputs are identical — mismatch is in another cert field"
@@ -730,10 +753,26 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 		die(useJSON, errors.CodeInvalidInput, "replay --batch: manifest contains no entries")
 	}
 
-	root, _, _, attestations := loadProjectGraph(useJSON)
+	root, cfg, _, attestations := loadProjectGraph(useJSON)
 	casRoot := filepath.Join(root, config.DirName, config.CASDir)
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
 	replayDate := time.Now().UTC().Format("2006-01-02")
+
+	// Load ProofGraph to resolve checker identities per claim.
+	claimCheckers := map[string]ir.CheckerIdentity{}
+	if graphData, readErr := os.ReadFile(filepath.Join(root, config.DirName, cfg.GraphSource)); readErr == nil {
+		if pg, compErr := compile.Compile(graphData, compile.FormatJSON); compErr == nil {
+			checkerByID := make(map[string]ir.CheckerIdentity, len(pg.Checkers))
+			for _, ch := range pg.Checkers {
+				checkerByID[ch.ID] = ch
+			}
+			for _, cl := range pg.Claims {
+				if ch, ok := checkerByID[cl.CheckerPolicy]; ok {
+					claimCheckers[cl.ID] = ch
+				}
+			}
+		}
+	}
 
 	if err := os.MkdirAll(attestDir, 0o755); err != nil {
 		die(useJSON, errors.CodeInternalError, "replay --batch: mkdir attestations: "+err.Error())
@@ -939,6 +978,7 @@ func cmdReplayBatch(manifestPath string, skipAccepted bool, useJSON bool) {
 
 			att := ir.Attestation{
 				ClaimID:        claimID,
+				Checker:        claimCheckers[claimID],
 				Outcome:        string(ir.StatusAccepted),
 				Assurance:      assurance,
 				ReplayMode:     "from_scratch",

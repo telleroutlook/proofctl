@@ -1,4 +1,4 @@
-# proofctl — Mathematical Proof Certification Platform (v0.3.8)
+# proofctl — Mathematical Proof Certification Platform (v0.3.9)
 
 `proofctl` is a content-addressed, evidence-aware, fail-closed **mathematical proof certification platform**. It provides the infrastructure layer for computer-assisted proof (CAP) projects: DAG management, content-addressed storage, attestation chains, freshness tracking, and a release gate.
 

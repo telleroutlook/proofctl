@@ -6,6 +6,43 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.9] — 2026-08-05
+
+### Fixed
+
+- **B1/C1 root cause — `cmd_pin.go` and `cmd_status.go` missing `.proofctl/` prefix**:
+  `pin checker` read graph source via `filepath.Join(root, cfg.GraphSource)`, missing
+  `config.DirName`. Watch loop in `proofctl status --watch` had the same bug.
+  Both now use `filepath.Join(root, config.DirName, cfg.GraphSource)`.
+  The underlying `config.Init` always writes `graph_source: "graph.json"` (correct);
+  users who worked around the bug by writing `".proofctl/graph.json"` should revert to
+  `"graph.json"` in their `.proofctl/config.json`.
+
+- **B2 batch path — `cmdReplayBatch` wrote attestations with zero `Checker` field**:
+  Batch replay now loads the ProofGraph at startup, builds a `claimID → CheckerIdentity`
+  map, and populates `att.Checker` per claim — same as the single-evidence path.
+  Attestations written by `--batch` no longer trigger `LEGACY_ATTESTATION_NOT_RELEASABLE`.
+
+- **D1 — `--reuse-generated` silent miss on full-length hex filenames**:
+  Previously the flag truncated the digest hex to 16 chars before looking up
+  `<dir>/<hex>.json`, silently falling back to the generator when users named files
+  with the full 64-char hex. Now tries the full-length name first, falls back to the
+  16-char prefix only if the full-length file does not exist.
+
+- **D3 — `compile --adapter contract-dir` lost `statement.text` and `checker_policy`**:
+  The adapter now loads the existing `.proofctl/graph.json` before recompiling and
+  preserves `statement.text` and `checker_policy` for any claim already present.
+  New claims (not yet in graph.json) still get empty text and no checker policy
+  as before.
+
+- **D4 — `proofctl doctor` exit 1 when proofctl not in PATH**:
+  `proofctl not found in PATH` is now a warning (`OK: true, Warn: true`) rather than
+  an error. Running the binary directly from a build directory is normal during
+  development; PATH installation is optional. Only genuine blocking conditions
+  (missing project, BRIDGE_CHECKER not set/executable, etc.) cause exit 1.
+
+---
+
 ## [v0.3.8] — 2026-08-05
 
 ### Security

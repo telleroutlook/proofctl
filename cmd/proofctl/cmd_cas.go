@@ -53,7 +53,7 @@ func cmdCasImport(args []string, useJSON bool) {
 	}
 
 	// Load graph source so we can update evidence sizes.
-	srcPath := filepath.Join(root, cfg.GraphSource)
+	srcPath := filepath.Join(root, config.DirName, cfg.GraphSource)
 	srcData, err := os.ReadFile(srcPath)
 	if err != nil {
 		die(useJSON, errors.CodeInternalError, "cannot read graph source: "+err.Error())
@@ -267,7 +267,7 @@ func cmdCasImportDir(args []string, useJSON bool) {
 	}
 
 	// Load graph source for evidence size updates.
-	srcPath := filepath.Join(root, cfg.GraphSource)
+	srcPath := filepath.Join(root, config.DirName, cfg.GraphSource)
 	srcData, err := os.ReadFile(srcPath)
 	if err != nil {
 		die(useJSON, errors.CodeInternalError, "cannot read graph source: "+err.Error())
@@ -415,7 +415,7 @@ func cmdCasGC(args []string, useJSON bool) {
 
 	// Collect all referenced digests from graph.json evidence list.
 	referenced := make(map[string]struct{})
-	srcPath := filepath.Join(root, cfg.GraphSource)
+	srcPath := filepath.Join(root, config.DirName, cfg.GraphSource)
 	if srcData, err := os.ReadFile(srcPath); err == nil {
 		if pg, err := compile.Compile(srcData, compile.FormatJSON); err == nil {
 			for _, ev := range pg.Evidence {

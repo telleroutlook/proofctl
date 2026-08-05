@@ -39,7 +39,7 @@ func cmdPinChecker(args []string, useJSON bool) {
 	root, cfg, _, _ := loadProjectGraph(useJSON)
 
 	// Load raw graph source (not compiled DAG) so we can rewrite it.
-	srcPath := filepath.Join(root, cfg.GraphSource)
+	srcPath := filepath.Join(root, config.DirName, cfg.GraphSource)
 	srcData, err := os.ReadFile(srcPath)
 	if err != nil {
 		die(useJSON, errors.CodeInternalError, "pin checker: read graph source: "+err.Error())

@@ -245,7 +245,7 @@ func TestGraph_NoProject(t *testing.T) {
 
 // writeMinimalGraph writes a graph.json with one checker to dir and
 // runs proofctl init + compile --fix-digests so .proofctl/graph.json exists.
-func writeMinimalGraph(t *testing.T, bin, dir, script string) {
+func writeMinimalGraph(t *testing.T, bin, dir, _ string) {
 	t.Helper()
 	zeroDigest := strings.Repeat("0", 64)
 	graph := `{
@@ -311,7 +311,7 @@ func TestPinChecker_WithLock(t *testing.T) {
 	}
 
 	// The graph source should now contain dependency_manifest_digest.
-	data, err := os.ReadFile(filepath.Join(dir, "graph.json"))
+	data, err := os.ReadFile(filepath.Join(dir, ".proofctl", "graph.json"))
 	if err != nil {
 		t.Fatalf("read graph.json: %v", err)
 	}
