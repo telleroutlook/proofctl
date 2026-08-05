@@ -259,14 +259,21 @@ def main() -> None:
         )
         sys.exit(0)
 
-    # exit 0 — CERTIFIED. Build shared metadata; all obligations pass.
-    metadata: dict = {
-        "digests_fresh": "true",
-        "path_keys_match": "true",
-        "intervals_intersect": "true",
-        "matrix_reconstructed": "true",
-        "ldlt_passes": "true",
-    }
+    # exit 0 — CERTIFIED. Build metadata; all obligations pass.
+    # digests_fresh is always true when checker returns 0: proofctl's freshness
+    # layer guarantees evidence was not substituted.
+    metadata: dict = {"digests_fresh": "true"}
+
+    # path_keys_match, intervals_intersect, matrix_reconstructed, ldlt_passes:
+    # Written only when the certificate carries a corresponding top-level field
+    # (value treated as truthy boolean). Weil certificates carry these fields;
+    # domains that do not (e.g. fp035) simply omit them — their policies must
+    # not list these keys in required_metadata_keys.
+    for cert_flag in ("path_keys_match", "intervals_intersect",
+                      "matrix_reconstructed", "ldlt_passes"):
+        val = cert_data.get(cert_flag)
+        if val is not None:
+            metadata[cert_flag] = "true" if val else "false"
 
     fmt_ver = _read_cert_field(cert_data, "format_version")
     if fmt_ver:

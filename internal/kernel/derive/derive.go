@@ -140,8 +140,11 @@ func DeriveClaimState(in DeriveInput) ClaimStateV2 {
 		return StateBlocked
 	}
 
-	// Rule 6a: native-dev runtime is permanently capped at LOCALLY_VERIFIED (T-M34-2).
-	// This is a kernel-level invariant — no policy can override it.
+	// Rule 6a: native-dev and native runtimes are permanently capped at LOCALLY_VERIFIED (T-M34-2).
+	// "scripted" is intentionally excluded: its trust anchor is evidence_digest + checker_digest,
+	// not sandbox isolation — the same guarantee as a pinned binary, just interpreted rather than
+	// compiled. It may reach GLOBALLY_VERIFIED when deps and obligations are satisfied.
+	// This is a kernel-level invariant for native-dev/native — no policy can override it.
 	nativeDevCapped := in.RuntimeClass == "native-dev" || in.RuntimeClass == "native"
 	if nativeDevCapped {
 		return StateLocallyVerified

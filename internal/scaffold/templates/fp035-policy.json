@@ -1,5 +1,5 @@
 {
-  "version": "1",
+  "version": "2",
   "target": "thm-fp-035",
   "allowed_assurances": [
     "deterministic-cap",
@@ -21,5 +21,5 @@
     "archimedean_obligation",
     "pivot_count"
   ],
-  "forbidden_runtimes": ["shadow", "native-dev"]
+  "forbidden_runtimes": ["shadow", "native-dev", "native"]
 }
