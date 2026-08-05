@@ -6,6 +6,42 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.5] — 2026-08-05
+
+### Added
+
+- **fp035 domain scaffold**: `proofctl init --domain fp035` now generates a policy template
+  (`required_metadata_keys`: `window_verified`, `archimedean_obligation`, `pivot_count`,
+  `cap_format_version`, `digests_fresh`) and graph template with `scripted` runtime class.
+  `fp035` is registered in `scaffold.KnownDomains`.
+
+- **`compile --adapter contract-dir <dir>`**: New adapter that reads a directory of
+  ContractV2 JSON files and compiles them into `.proofctl/graph.json`. Each ContractV2
+  becomes one claim; dependency edges are derived from `dependencies[].claim_id`. Lint
+  warnings are printed to stderr (non-fatal). Useful for projects like weil-first-prime
+  whose claims live in `domains/fp035/contracts/`.
+
+- **`scripted` runtime class**: Added `"scripted"` as a recognised `runtime.class` value
+  in `internal/kernel/contract/lint.go`. Semantics: a deterministic script checker running
+  natively (e.g. Python + interval arithmetic), where the trust anchor is the evidence
+  digest and checker_digest, not sandbox isolation. This is the honest alternative to the
+  incorrect `"wasi"` label for native Python checkers.
+
+- **bridge.py — three new metadata keys** (both `adapters/cap/bridge.py` and
+  `internal/scaffold/bridge.py` updated in sync):
+  - `window_verified` — extracted from certificate top-level `"window"` field
+  - `archimedean_obligation` — extracted from `certificate.archimedean_base.obligation`
+  - `pivot_count` — extracted from certificate top-level `"pivot_count"` field
+  All three are emitted only when present in the certificate; absent fields are silently
+  skipped (no change to existing behaviour for certs that lack these fields).
+
+- **`graph_source` config field wired up**: `loadProjectGraph` now reads
+  `.proofctl/config.json`'s `graph_source` field and resolves the graph path relative to
+  `.proofctl/`. Previously the field was parsed but never used; the graph was always loaded
+  from `.proofctl/graph.json`.
+
+---
+
 ## [v0.2.8] — 2026-08-04
 
 ### Fixed

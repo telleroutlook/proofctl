@@ -1,0 +1,25 @@
+{
+  "version": "1",
+  "target": "thm-fp-035",
+  "allowed_assurances": [
+    "deterministic-cap",
+    "exact-replay",
+    "reproducible-computation"
+  ],
+  "forbidden_assurances": [
+    "ai-review",
+    "assumption",
+    "shadow-review"
+  ],
+  "required_claims": [
+    "thm-fp-035"
+  ],
+  "required_metadata_keys": [
+    "cap_format_version",
+    "digests_fresh",
+    "window_verified",
+    "archimedean_obligation",
+    "pivot_count"
+  ],
+  "forbidden_runtimes": ["shadow", "native-dev"]
+}

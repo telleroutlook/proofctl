@@ -192,7 +192,11 @@ func loadProjectGraph(useJSON bool) (string, *config.ProjectConfig, *dag.DAG, ma
 		die(useJSON, errors.CodeInvalidInput, err.Error())
 	}
 
-	graphPath := filepath.Join(root, config.DirName, config.GraphFile)
+	graphFile := config.GraphFile
+	if cfg.GraphSource != "" {
+		graphFile = cfg.GraphSource
+	}
+	graphPath := filepath.Join(root, config.DirName, graphFile)
 	graphData, err := os.ReadFile(graphPath)
 	if err != nil {
 		if os.IsNotExist(err) {

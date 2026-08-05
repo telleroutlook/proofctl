@@ -14,8 +14,9 @@ proofctl 成为数学证明类项目的通用认证基础设施平台。数学�
 ## 范围说明
 
 - proofctl 是**认证基础设施**，不做数学推导
-- weil-lower-bound 是第一个参考域实现
-- 当前第一个目标域是 weil-class；未来可拓展
+- 当前 pilot 域：weil-first-prime（fp035 区间算术证明）
+- 历史参考域：weil-lower-bound（已退出 pilot）
+- 当前目标域：fp035；未来可拓展至其他 CAP/formal-kernel 域
 
 ---
 
@@ -1772,3 +1773,40 @@ native-dev 除 C09 policy 之外没有硬性禁止；多个域缺少 conformance
 | INV-10 | native 结果不得进 release | `internal/release.C09` + `internal/policy.ForbiddenRuntimes` + `testdata/mutation/` C09 fixture | M26/M29 ✅ |
 | INV-11 | release 必须从原始 v2 文件重新推导 | `proofverify bundle.verify` 不读 STATUS 文件 | M25 ✅ |
 | INV-12 | release bundle 可独立离线复核 | `cmd/proofverify bundle.verify` + `proofctl bundle verify` | M25/M29 ✅ |
+
+---
+
+## Milestone 36 — fp035 域接入（weil-first-prime pilot）✅
+
+**背景：** pilot 项目从 weil-lower-bound 切换为 weil-first-prime。该项目的 checker 是
+Python + interval arithmetic（区间算术），checker 协议复用 CAP bridge，但需要三个新的
+metadata key，以及从 ContractV2 目录直接编译 graph 的新工作流。
+
+**架构说明：** weil-first-prime 的 checker 是普通 Python 脚本，与 WASI 无关。
+`scripted` runtime class 是此类 checker 的正确标签；它不受 INV-10 的 native-dev 上限
+限制（native-dev 语义是"开发调试用"），可走完整验证路径。
+
+### 完成产出（v0.3.5）
+
+- **`scripted` runtime class**：`internal/kernel/contract/lint.go` 新增为合法值；
+  语义：确定性脚本检查器，信任锚在 evidence digest + checker_digest，而非沙箱隔离
+- **bridge.py 三个新 metadata key**（`adapters/cap/bridge.py` + `internal/scaffold/bridge.py` 同步）：
+  - `window_verified` — certificate `"window"` 字段
+  - `archimedean_obligation` — `certificate.archimedean_base.obligation`
+  - `pivot_count` — certificate `"pivot_count"` 字段
+- **`compile --adapter contract-dir <dir>`**：读取 ContractV2 JSON 目录，直接编译为 graph.json；
+  lint 警告打印到 stderr（非致命）
+- **`fp035` domain in `scaffold.KnownDomains`**：`proofctl init --domain fp035` 可用；
+  policy 模板包含五个 required_metadata_keys；graph 模板使用 `scripted` runtime
+- **`graph_source` 字段 wire-up**：`loadProjectGraph` 现在读取 config.json 的 `graph_source`
+  字段；之前字段被解析但从未使用
+
+### 已确认的架构约束（非 bug，记录在案）
+
+- weil-first-prime 的 checker（Python + python-flint）无 WASI 路径；可达 assurance 上限
+  为 `deterministic-cap` / `reproducible-computation`，不能达到 `formal-kernel`
+- bridge.py metadata 字段（`path_keys_match` 等）信任 checker exit code，
+  这是 CAP bridge 的设计约定，不是框架 bug
+- checker_digest 全零占位符需在 checker 代码稳定后执行 `proofctl pin checker` 填入；
+  在此之前 `proofctl doctor` 会提示 checker not pinned
+

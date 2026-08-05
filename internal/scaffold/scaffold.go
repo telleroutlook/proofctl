@@ -104,6 +104,13 @@ var KnownDomains = []Domain{
 			"ROOT":          "templates/isabelle-ROOT",
 		},
 	},
+	{
+		Name:           "fp035",
+		Description:    "First-prime-after-gap domain: interval-arithmetic CAP checker for fp035 claims (scripted runtime)",
+		PolicyTemplate: "templates/fp035-policy.json",
+		GraphTemplate:  "templates/fp035-graph.json",
+		BridgeSrc:      "bridge.py",
+	},
 }
 
 // Lookup returns the Domain for name, or an error if unknown.
@@ -113,7 +120,7 @@ func Lookup(name string) (Domain, error) {
 			return d, nil
 		}
 	}
-	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt, lean, coq, isabelle)", name)
+	return Domain{}, fmt.Errorf("scaffold: unknown domain %q (known: cap, lrat, qmd, metamath, smt, lean, coq, isabelle, fp035)", name)
 }
 
 // Init writes all scaffold files for domain into root.

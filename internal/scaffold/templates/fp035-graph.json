@@ -1,0 +1,50 @@
+{
+  "claims": [
+    {
+      "id": "def-fp035-model",
+      "kind": "definition",
+      "statement": {
+        "text": "REPLACE: describe the first-prime-after-0.35-gap model and frozen constants.",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": [],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [],
+      "checker_policy": ""
+    },
+    {
+      "id": "thm-fp-035",
+      "kind": "theorem",
+      "statement": {
+        "text": "REPLACE: state the main fp035 theorem (e.g. the first prime after a gap of 0.35 satisfies archimedean bounds).",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "depends_on": ["def-fp035-model"],
+      "required_assurance": ["deterministic-cap"],
+      "evidence": [
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "checker_policy": "fp035-v2"
+    }
+  ],
+  "checkers": [
+    {
+      "id": "REPLACE-checker-id",
+      "protocol_version": 2,
+      "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "schema_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime": {
+        "kind": "scripted"
+      },
+      "network": "none"
+    }
+  ],
+  "evidence": [
+    {
+      "media_type": "application/json; profile=certificate-v2",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 0,
+      "path_hint": "certificates/REPLACE-cert.json"
+    }
+  ]
+}

@@ -285,6 +285,21 @@ def main() -> None:
     elif sector == "even":
         metadata["even_sector_passes"] = "true"
 
+    # window_verified: the window identifier string from the certificate.
+    window = _read_cert_field(cert_data, "window")
+    if window:
+        metadata["window_verified"] = window
+
+    # archimedean_obligation: obligation field inside archimedean_base sub-object.
+    arch_obl = (cert_data.get("archimedean_base") or {}).get("obligation", "")
+    if arch_obl:
+        metadata["archimedean_obligation"] = str(arch_obl)
+
+    # pivot_count: number of pivots verified in the certificate.
+    pivot_count = _read_cert_field(cert_data, "pivot_count")
+    if pivot_count:
+        metadata["pivot_count"] = pivot_count
+
     json.dump(
         _out_obligations(claim_id, obligation_ids, "pass", metadata=metadata,
                          evidence_used=evidence_digests),

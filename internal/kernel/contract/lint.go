@@ -99,10 +99,10 @@ func LintContract(c ContractV2) []LintError {
 
 	// runtime
 	requireNonEmpty("runtime.class", c.Runtime.Class, "MISSING")
-	knownClasses := map[string]bool{"isolated-oci": true, "native-dev": true, "wasi": true}
+	knownClasses := map[string]bool{"isolated-oci": true, "native-dev": true, "wasi": true, "scripted": true}
 	if c.Runtime.Class != "" && !knownClasses[c.Runtime.Class] {
 		add("runtime.class", "UNKNOWN_CLASS",
-			fmt.Sprintf("runtime.class %q is not a known class (known: isolated-oci, native-dev, wasi)", c.Runtime.Class))
+			fmt.Sprintf("runtime.class %q is not a known class (known: isolated-oci, native-dev, scripted, wasi)", c.Runtime.Class))
 	}
 
 	// evidence mode
