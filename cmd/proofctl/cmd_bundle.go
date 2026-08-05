@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/telleroutlook/proofctl/internal/kernel/bundle"
+	"github.com/telleroutlook/proofctl/internal/signing"
 )
 
 // cmdBundle implements `proofctl bundle`.
@@ -161,6 +162,27 @@ func cmdBundleCreate(args []string, useJSON bool) {
 		Members:                members,
 		GeneratedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
+
+	// Validate member paths before writing.
+	if err := validateMemberPaths(members); err != nil {
+		die(useJSON, "INVALID_INPUT", err.Error())
+	}
+
+	// Sign manifest if PROOFCTL_SIGNING_KEY is set.
+	if keyPath := os.Getenv("PROOFCTL_SIGNING_KEY"); keyPath != "" {
+		if sigKey, keyErr := signing.LoadPrivate(keyPath); keyErr == nil {
+			if payload, pErr := bundle.CanonicalPayload(&manifest); pErr == nil {
+				if sig, sErr := sigKey.SignBytes(payload); sErr == nil {
+					manifest.ReleaseAuthority.KeyFingerprint = sig.PubkeyFingerprint
+					manifest.ReleaseAuthority.Algorithm = sig.Algorithm
+					manifest.ReleaseAuthority.SignatureValue = sig.Value
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: could not load signing key %s: %v\n", keyPath, keyErr)
+		}
+	}
+
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		die(useJSON, "INTERNAL_ERROR", "marshal manifest: "+err.Error())
@@ -270,4 +292,24 @@ func bundleDigest(data []byte) string {
 	_ = io.Discard // imported for clarity
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("sha256:%x", sum)
+}
+
+// validateMemberPaths checks that all bundle member paths are safe:
+// no absolute paths, no ".." components, no duplicate paths.
+func validateMemberPaths(members []bundle.ManifestMemberDigest) error {
+	seen := make(map[string]bool, len(members))
+	for _, m := range members {
+		if filepath.IsAbs(m.Path) {
+			return fmt.Errorf("bundle member path %q must be relative, not absolute", m.Path)
+		}
+		clean := filepath.Clean(m.Path)
+		if strings.HasPrefix(clean, "..") {
+			return fmt.Errorf("bundle member path %q escapes bundle root", m.Path)
+		}
+		if seen[clean] {
+			return fmt.Errorf("duplicate bundle member path: %q", m.Path)
+		}
+		seen[clean] = true
+	}
+	return nil
 }

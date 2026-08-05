@@ -165,6 +165,34 @@ func Verify(pub *Key, v any, sig Signature) error {
 	return nil
 }
 
+// SignBytes signs raw bytes directly (no JSON marshalling).
+func (k *Key) SignBytes(data []byte) (Signature, error) {
+	if k.PrivateKey == nil {
+		return Signature{}, fmt.Errorf("signing: no private key loaded")
+	}
+	sig := ed25519.Sign(k.PrivateKey, data)
+	return Signature{
+		PubkeyFingerprint: k.ID,
+		Algorithm:         Algorithm,
+		Value:             base64.StdEncoding.EncodeToString(sig),
+	}, nil
+}
+
+// VerifyBytes verifies sig against raw bytes directly.
+func VerifyBytes(pub *Key, data []byte, sig Signature) error {
+	if sig.Algorithm != Algorithm {
+		return fmt.Errorf("signing: unsupported algorithm %q", sig.Algorithm)
+	}
+	sigBytes, err := base64.StdEncoding.DecodeString(sig.Value)
+	if err != nil {
+		return fmt.Errorf("signing: decode signature value: %w", err)
+	}
+	if !ed25519.Verify(pub.PublicKey, data, sigBytes) {
+		return fmt.Errorf("signing: signature verification failed")
+	}
+	return nil
+}
+
 // canonicalForSigning marshals v to JSON, removes the "signature" key if
 // present, then re-marshals for signing/verification.
 func canonicalForSigning(v any) ([]byte, error) {

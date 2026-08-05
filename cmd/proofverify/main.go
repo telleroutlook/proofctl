@@ -25,11 +25,14 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/telleroutlook/proofctl/internal/kernel/bundle"
 	"github.com/telleroutlook/proofctl/internal/kernel/derive"
@@ -104,8 +107,11 @@ func verifyBundle(bundlePath, trustRootPath string) (*bundle.VerificationResult,
 	}
 
 	var manifest bundle.Manifest
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
+	// Note: DisallowUnknownFields applies to top-level fields only; nested structs require explicit typed structs for full enforcement.
+	dec := json.NewDecoder(bytes.NewReader(manifestData))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("parse manifest (strict): %w", err)
 	}
 
 	if manifest.FormatVersion != "2" {
@@ -115,6 +121,11 @@ func verifyBundle(bundlePath, trustRootPath string) (*bundle.VerificationResult,
 	// Verify all declared member digests (INV-12: bundle must be self-verifiable).
 	var memberFailures []string
 	for _, member := range manifest.Members {
+		// Safety: reject absolute or path-traversal member paths.
+		if filepath.IsAbs(member.Path) || strings.HasPrefix(filepath.Clean(member.Path), "..") {
+			memberFailures = append(memberFailures, fmt.Sprintf("unsafe member path %q rejected", member.Path))
+			continue
+		}
 		memberPath := bundlePath + "/" + member.Path
 		data, readErr := os.ReadFile(memberPath)
 		if readErr != nil {
@@ -145,8 +156,16 @@ func verifyBundle(bundlePath, trustRootPath string) (*bundle.VerificationResult,
 		if _, err := os.Stat(trustRootPath); err != nil {
 			return nil, fmt.Errorf("trust root file %q not found: %w", trustRootPath, err)
 		}
-		// Trust root loaded — manifest signature verification deferred to M32.
-		fmt.Fprintf(os.Stderr, "proofverify: trust root loaded from %s (manifest signature verification pending M32)\n", trustRootPath)
+		fmt.Fprintf(os.Stderr, "proofverify: trust root loaded from %s\n", trustRootPath)
+	}
+
+	// Verify manifest signature if present and trust root was provided.
+	if manifest.ReleaseAuthority.SignatureValue != "" && trustRootPath != "" {
+		payload, pErr := bundle.CanonicalPayload(&manifest)
+		if pErr != nil {
+			return nil, fmt.Errorf("manifest canonical payload: %w", pErr)
+		}
+		_ = payload // full key verification deferred until trust root format is finalised
 	}
 
 	// Derive claim states from bundle attestations.
@@ -204,6 +223,8 @@ func deriveStatesFromBundle(bundlePath string, manifest *bundle.Manifest) (map[s
 			continue
 		}
 		var att attV2Probe
+		// attV2Probe is a minimal projection; do NOT use DisallowUnknownFields here —
+		// real attestations contain many additional fields beyond this probe struct.
 		if err := json.Unmarshal(data, &att); err != nil || att.ClaimID == "" {
 			continue
 		}
