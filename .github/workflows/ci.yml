@@ -66,6 +66,19 @@ jobs:
       - name: Test with race detector
         run: go test -race -timeout 120s ./...
 
+      - name: Coverage threshold check
+        run: |
+          go test -coverprofile=coverage.out -covermode=atomic ./internal/kernel/... ./internal/release/... ./pkg/protocol/v2/... 2>/dev/null
+          go tool cover -func=coverage.out | grep -E "^total" | awk '{
+            pct = $3
+            gsub(/%/, "", pct)
+            if (pct + 0 < 80.0) {
+              print "FAIL: coverage " pct "% < 80% threshold"
+              exit 1
+            }
+            print "OK: coverage " pct "%"
+          }'
+
   example-smoke-test:
     name: Example Smoke Test
     runs-on: ubuntu-latest
@@ -163,6 +176,26 @@ jobs:
           proofctl init --domain metamath
           proofctl compile graph.json
           echo "metamath domain: init + compile OK"
+
+  domains-conformance:
+    name: Domain Conformance Suite
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Run domain conformance tests
+        run: go test ./testdata/conformance/... -v
+
+      - name: Run exploit regression tests
+        run: go test ./testdata/adversarial/... -v -run TestExploit
 
   fuzz:
     name: Fuzz

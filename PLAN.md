@@ -961,7 +961,7 @@ T35 (push/pull)        ──→ 依赖 T34
 - v0.2.6：B18（metadata 覆盖）、B19（self_digest 缺失）、B20（release --fix 误报）、E12（check --evidence）、E13（cas gc 确认）
 - v0.2.9：M23 — Bug 1–5 修复（schema_digest pin、绝对路径拒绝、evidence digest 重算、resources 计时、reviewer 强制）
 
-**当前版本：v0.2.8**（2026-08-04）
+**当前版本：v0.3.0**（2026-08-05）
 
 ---
 
@@ -1471,6 +1471,21 @@ core 不新增任何 Metamath 硬编码。
 
 ---
 
+## Milestone 31 — Canvas P0：止血（fail-closed）✅
+
+### 完成产出（2026-08-05）
+
+- `internal/errors/errors.go`：新增 `CodeLegacyAttestation`、`CodeInputClosureMismatch`、`CodeEvidenceSetMismatch`
+- `internal/release/gate.go`：v1 attestation 在 release 路径直接失败（T-M31-1）
+- `cmd/proofctl/main.go`：loadAttestations 对 v2 attestation 验签（T-M31-2）
+- `internal/release/conditions.go`：C05 调用 `signing.Verify()` 真正验证 Ed25519（T-M31-3）
+- `cmd/proofverify/main.go`：trust root 缺失时输出 `TRUST_ROOT_REQUIRED` blocker（T-M31-4）
+- `internal/verify/verify.go`：`loadObligationIDs()` 从 ContractV2 读取义务集合接入 pipeline（T-M31-5）；`runCheckerAllEvidence` 任意 evidence 失败即阻断（T-M31-6）
+- `pkg/protocol/v2/validate.go`：`AllObligationsPass` 对空结果返回 false（T-M31-P09）
+- `testdata/adversarial/exploit_regression_test.go`：10 个 Canvas §9 攻击回归测试
+
+---
+
 ## Milestone 32 — Canvas P1：闭合 v2 可信核
 
 **背景：** M31 止血后，建立完整的 BundleV2 布局和 proofverify 严格加载器，
@@ -1525,6 +1540,19 @@ core 不新增任何 Metamath 硬编码。
 - 从空目录仅凭伪造 JSON 无法产生 released（regression test 覆盖）
 - 对 bundle 任意语义字节的修改导致 deterministic blocker
 - 外部 trust root 替换（使用未知 key）必然 `MANIFEST_SIGNATURE_INVALID`
+
+---
+
+## Milestone 32 — Canvas P1：闭合 v2 可信核✅
+
+### 完成产出（2026-08-05）
+
+- `internal/kernel/bundle/sign.go`：`CanonicalPayload`/`PayloadDigest`（release_authority 字段排除在外）
+- `internal/signing/signing.go`：`SignBytes`/`VerifyBytes` 原始字节签名
+- `cmd/proofctl/cmd_bundle.go`：`validateMemberPaths`（拒绝绝对路径、`..`、重复路径）；`PROOFCTL_SIGNING_KEY` 自动签名 manifest
+- `cmd/proofverify/main.go`：manifest 严格 JSON 解析（DisallowUnknownFields）；manifest 签名结构验证
+- `internal/kernel/policy/loader.go`：`LoadPolicyV2` 严格 JSON loader + version/target 校验
+- `internal/kernel/bundle/sign_test.go`：6 个 canonicalization test vectors
 
 ---
 
@@ -1589,6 +1617,18 @@ core 不新增任何 Metamath 硬编码。
 
 ---
 
+## Milestone 33 — Canvas P2：Weil 义务真实接入✅
+
+### 完成产出（2026-08-05）
+
+- `adapters/cap/bridge.py` + `internal/scaffold/bridge.py`：P1-01 `obligation_id`→`id`；P1-02 义务来源从 input 而非 certificate；新增 `evidence_used` 字段
+- `internal/verify/verify.go`：`checkClosureBinding()`——claim_id + protocol_version 绑定校验
+- `domains/weil/contracts/`：D1–D18 全部补充 evidence roles（primary/sector/matrix/ldlt 等）+ `replay_profile`
+- `adapters/cap/test_bridge_conformance.py`：5 个 Python 协议一致性测试
+- `testdata/adversarial/exploit_regression_test.go`：TestExploit11（obligation 字段名回归测试）
+
+---
+
 ## Milestone 34 — Canvas P3：生产隔离与多域合规
 
 **背景：** OCI runner 存在但返回 ErrNotImplemented（P0-12）；
@@ -1646,6 +1686,18 @@ native-dev 除 C09 policy 之外没有硬性禁止；多个域缺少 conformance
 
 ---
 
+## Milestone 34 — Canvas P3：生产隔离与多域合规✅
+
+### 完成产出（2026-08-05）
+
+- `internal/runtime/oci/runner.go`：真实 Docker 实现——digest-pinned image、`--network none`、`--read-only`、`--security-opt=no-new-privileges`、固定 locale/TZ、可选 CPU/内存限制、CAS `:ro` 挂载
+- `internal/kernel/derive/derive.go`：`RuntimeClass` 字段 + Rule 6a：native-dev/native 在 kernel 层永久上限 LOCALLY_VERIFIED（4 个回归测试）
+- `testdata/conformance/conformance_test.go`：13 个 protocol v2 一致性 vectors（8 个域）
+- `cmd/proofctl/cmd_mutate.go`：`--mode static|dynamic` 标志
+- `internal/kernel/policy/fuzz_test.go`：`FuzzLoadPolicyV2` + 8 个种子语料
+
+---
+
 ## Milestone 35 — 治理文档与 DoD 闸门
 
 **背景：** Canvas §11–§12 列出了仓库治理要求和最终完成定义（DoD），
@@ -1687,6 +1739,18 @@ native-dev 除 C09 policy 之外没有硬性禁止；多个域缺少 conformance
 - `SECURITY-INVARIANTS.md` 中每条 INV 有对应代码位置和 test 函数名
 - CI 四道门全部通过才允许 merge
 - Canvas §12 DoD checklist 中每个 `[ ]` 变为 `[x]` 并有机器链接
+
+---
+
+## Milestone 35 — 治理文档与 DoD 闸门✅
+
+### 完成产出（2026-08-05）
+
+- `SECURITY-INVARIANTS.md`：INV-01–INV-12 全部映射到代码位置和测试函数
+- `.github/PULL_REQUEST_TEMPLATE.md`：新增安全不变量 checklist（影响哪条 INV、新信任输入、覆盖测试）
+- `.github/workflows/ci.yml`：新增 `domains-conformance` job（域一致性 + exploit 回归）；`build-and-test` 新增覆盖率阈值步骤（≥80%）
+- `README.md`：更新版本、架构描述、新增命令列表（M30–M34 新增的命令）
+- `CLAUDE.md`：更新项目 conventions 反映 M31–M35 新增的不变量和规则
 
 ---
 

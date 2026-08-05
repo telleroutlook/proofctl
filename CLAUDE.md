@@ -98,6 +98,8 @@ The v2 trusted kernel lives in `internal/kernel/`:
 - `release --dry-run` is the safe path: evaluates conditions without writing STATUS.json
 - C09 (`no-native-runtime`) is activated when `policy.ForbiddenRuntimes` is non-empty
 - proofverify is the offline verifier: `proofverify bundle.verify <bundle-dir>`
+- `proofctl release` 拒绝 v1 attestation（`LEGACY_ATTESTATION_NOT_RELEASABLE`）
+- C05 现在调用真正的 Ed25519 验签（不只检查字段非空）
 
 ## status conventions
 
@@ -138,6 +140,15 @@ The v2 trusted kernel lives in `internal/kernel/`:
 - `proofctl verify --signature-only --project` — signature-only check over all claims
 - Use `--signature-only` in CI session-start checks and downstream consumer repos to avoid
   checker binary digest mismatch while still enforcing cryptographic attestation integrity
+- `proofctl verify` wires obligation IDs from ContractV2 JSON via `loadObligationIDs()`
+- multi-evidence: any per-evidence failure blocks the whole claim (INV-07)
+
+## security invariant conventions
+
+- 12 个 Canvas 不变量（INV-01–INV-12）在 `SECURITY-INVARIANTS.md` 中有完整映射
+- native-dev/native runtime 在 `internal/kernel/derive` Rule 6a 处被硬性上限到 LOCALLY_VERIFIED
+- `pkg/protocol/v2/AllObligationsPass` 对空 ObligationResults 返回 false
+- `internal/kernel/bundle/sign.go:CanonicalPayload` 排除 release_authority 字段（防止签名递归）
 
 ## git-hook conventions
 
