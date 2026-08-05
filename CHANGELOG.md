@@ -6,6 +6,33 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.6] — 2026-08-05
+
+### Fixed
+
+- **derive.go Rule 6a comment**: documented why `scripted` is excluded from the
+  `native-dev`/`native` cap. Trust anchor for `scripted` is `evidence_digest +
+  checker_digest` (same as a pinned binary, interpreted rather than compiled);
+  it may reach `GLOBALLY_VERIFIED` when deps and obligations are satisfied.
+  No behaviour change — this was already correct, just undocumented.
+
+- **fp035-policy.json template**: `"version"` corrected from `"1"` to `"2"`
+  (`forbidden_runtimes` is a v2 field). Added `"native"` to `forbidden_runtimes`
+  (was `["shadow", "native-dev"]`, now `["shadow", "native-dev", "native"]`),
+  consistent with weil-first-prime's own policy file.
+
+- **bridge.py — conditional Weil metadata keys** (both `adapters/cap/bridge.py`
+  and `internal/scaffold/bridge.py` in sync): `path_keys_match`,
+  `intervals_intersect`, `matrix_reconstructed`, `ldlt_passes` are now emitted
+  **only when the certificate carries the corresponding top-level field**. The
+  value is read from the cert (`true`/`false`) rather than hardcoded `"true"`.
+  `digests_fresh` remains unconditional. Weil certificates that carry these
+  fields are unaffected; fp035 certificates that omit them produce no spurious
+  metadata keys, so fp035 policies that do not list these keys in
+  `required_metadata_keys` will not fail at release.
+
+---
+
 ## [v0.3.5] — 2026-08-05
 
 ### Added
