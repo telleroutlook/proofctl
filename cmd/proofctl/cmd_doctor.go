@@ -18,6 +18,7 @@ import (
 type doctorCheck struct {
 	Name   string `json:"name"`
 	OK     bool   `json:"ok"`
+	Warn   bool   `json:"warn,omitempty"`
 	Detail string `json:"detail"`
 	Fix    string `json:"fix,omitempty"`
 }
@@ -45,6 +46,7 @@ func cmdDoctor(args []string, useJSON bool) {
 		checks = append(checks, checkProofctlAdaptersEnv(root))
 		checks = append(checks, checkCheckerPinned(root))
 		checks = append(checks, checkCASNonEmpty(root))
+		checks = append(checks, checkScriptedRuntime(root))
 	}
 
 	allOK := true
@@ -64,7 +66,12 @@ func cmdDoctor(args []string, useJSON bool) {
 		_ = enc.Encode(jsonOut{Checks: checks, OK: allOK})
 	} else {
 		for _, c := range checks {
-			if c.OK {
+			if c.OK && c.Warn {
+				fmt.Printf("⚠ %s\n", c.Detail)
+				if c.Fix != "" {
+					fmt.Printf("  → %s\n", c.Fix)
+				}
+			} else if c.OK {
 				fmt.Printf("✓ %s\n", c.Detail)
 			} else {
 				fmt.Printf("✗ %s\n", c.Detail)
@@ -299,4 +306,38 @@ func loadCompiledGraph(root string) *ir.ProofGraph {
 		return nil
 	}
 	return pg
+}
+
+// checkScriptedRuntime warns when any checker uses runtime kind "scripted".
+// scripted checkers run as plain host processes; cross-machine reproducibility
+// depends on the environment rather than a pinned container image.
+func checkScriptedRuntime(root string) doctorCheck {
+	pg := loadCompiledGraph(root)
+	if pg == nil {
+		return doctorCheck{
+			Name:   "scripted-runtime",
+			OK:     true,
+			Detail: "scripted-runtime check skipped (no compiled graph.json)",
+		}
+	}
+	var scripted []string
+	for _, ch := range pg.Checkers {
+		if ch.Runtime.Kind == "scripted" {
+			scripted = append(scripted, ch.ID)
+		}
+	}
+	if len(scripted) > 0 {
+		return doctorCheck{
+			Name:   "scripted-runtime",
+			OK:     true,
+			Warn:   true,
+			Detail: fmt.Sprintf("runtime 'scripted' in use (%s): cross-machine reproducibility depends on host environment, not a pinned container", strings.Join(scripted, ", ")),
+			Fix:    "consider 'isolated-oci' runtime for third-party independent verification",
+		}
+	}
+	return doctorCheck{
+		Name:   "scripted-runtime",
+		OK:     true,
+		Detail: "no scripted-runtime checkers",
+	}
 }

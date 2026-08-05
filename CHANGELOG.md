@@ -6,6 +6,23 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.7] — 2026-08-05
+
+### Added
+
+- **`proofctl doctor` — scripted-runtime warning**: when any checker in
+  `graph.json` uses `runtime.kind = "scripted"`, doctor now emits a `⚠`
+  warning (exit 0, not a failure):
+  ```
+  ⚠ runtime 'scripted' in use (<checker-id>): cross-machine reproducibility
+    depends on host environment, not a pinned container
+    → consider 'isolated-oci' runtime for third-party independent verification
+  ```
+  Available in `--json` output as `{"ok": true, "warn": true, ...}`.
+  `scripted` checkers are fully functional — this is informational only.
+
+---
+
 ## [v0.3.6] — 2026-08-05
 
 ### Fixed
