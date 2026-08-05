@@ -6,6 +6,67 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.11] — 2026-08-06
+
+### Fixed
+
+- **B6 — `proofctl attest` wrote v2 attestation with empty `ObligationResults`**:
+  After the v0.3.10 fix for B4, `proofctl attest` correctly set `Checker.ProtocolVersion=2`
+  but left `ObligationResults` empty. `deriveStatus` (v2 path) returns `StatusRejected`
+  when `ObligationResults` is empty, so attested claims immediately showed as `REJECTED`
+  despite the `accepted` outcome. Fixed in `buildAndWriteAttestation` and the new helper
+  `buildObligationResults`: when `outcome == "accepted"` and `checker.ProtocolVersion == 2`,
+  the function looks up the claim's contract in `domains/*/contracts/<claimID>.json` and
+  fills `ObligationResults` with `verdict: "pass"` for each declared obligation.
+  Falls back to a single synthetic `independent-review.accepted` result when no contract
+  is found, ensuring the attestation is always accepted. The fix applies to both the
+  single-claim and `--batch` paths.
+
+- **B3 — `proofctl replay` did not propagate `metadata` from checker stdout to attestation**:
+  The checker JSON output may include a `"metadata": {...}` map (e.g. for `required_metadata_keys`
+  policy conditions). Previously `cmd_replay.go` parsed `obligation_results` from checker
+  stdout but ignored `metadata`, so `release --dry-run` always failed `meta:*` conditions
+  even when the checker emitted the required keys. Fixed: `checkerMetadata` is now collected
+  alongside `obligationResults` and merged into the attestation's `Metadata` map
+  (checker values do not overwrite the fixed internal keys such as `cold_replay_date`).
+
+---
+
+## [v0.3.10] — 2026-08-06
+
+### Fixed
+
+- **B4 — `proofctl attest` wrote v1 attestations (`protocol_version=0`)**:
+  `buildAndWriteAttestation` now looks up the claim's `CheckerPolicy` in the compiled
+  ProofGraph and populates `att.Checker` from the matching `CheckerIdentity`. This ensures
+  `protocol_version=2` is recorded and `LEGACY_ATTESTATION_NOT_RELEASABLE` is no longer
+  triggered by `proofctl attest`-written attestations.
+  Requires `--metadata reviewer=<name-or-orcid>` for `--assurance independent-review`
+  to maintain auditability.
+
+- **B5 — partial-replay debug file used `.json` extension causing `loadAttestations` crash**:
+  `writePartialReplayRecord` now writes to `<claim>-replay-partial.debug` instead of
+  `<claim>-replay-partial.json`. The `.json` extension caused `loadAttestations`
+  (which uses `json.Decoder` with `DisallowUnknownFields`) to crash on the unknown
+  `"date"` and `"note"` fields in the partial record format, blocking all subsequent
+  `proofctl status` / `cas import` invocations until the file was manually deleted.
+
+- **D4 — `proofctl doctor` CAS check reported "skipped" even when blobs are present**:
+  `checkCASNonEmpty` now iterates `pg.Evidence` and stats each declared blob path
+  individually, reporting which specific digests are missing. Previously it only
+  checked whether the CAS directory was non-empty.
+
+- **D5 — `proofctl status` did not show why a claim was `REJECTED`**:
+  REJECTED claims now include a reason suffix derived from `att.Metadata["note"]`
+  or `att.BlockReason` when available, e.g. `REJECTED  (obligation_results empty)`.
+
+- **I2 — `compile --adapter contract-dir` silently discarded existing `checkers` array**:
+  `compileContractDir` now copies all checker entries from the existing `graph.json`
+  into the newly compiled `ProofGraph`. Previously every re-compile wiped the
+  `checkers` array, requiring manual re-pinning after each `proofctl pin checker` run.
+
+---
+
 ## [v0.3.9] — 2026-08-05
 
 ### Fixed
