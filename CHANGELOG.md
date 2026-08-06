@@ -6,6 +6,25 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.12] — 2026-08-06
+
+### Added
+
+- **`proofctl check --timeout <duration>`**: per-checker wall-clock timeout override.
+  The runner's default is 5 minutes and maximum is 10 minutes, which is insufficient
+  for checkers that independently recompute heavy integrals (e.g. the weil-first-prime
+  archimedean checker needs ~600 s for the even sector, exceeding the old 5 m default).
+  Usage: `proofctl check --timeout 20m @lem-o1b-even`
+  Zero (the default) preserves the existing 5 m default. The runner's 10 m MaxWallClock
+  cap is unchanged; values above it are silently clamped.
+
+### Known limitation
+
+- The per-checker timeout is not yet configurable in the ContractV2 JSON.
+  A `runtime.timeout_seconds` field is planned for v0.4.
+
+---
+
 ## [v0.3.11] — 2026-08-06
 
 ### Fixed

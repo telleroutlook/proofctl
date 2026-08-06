@@ -36,6 +36,7 @@ func cmdCheck(args []string, useJSON bool) {
 	noCacheFlag := fs.Bool("no-cache", false, "skip cache lookup and re-run checker unconditionally")
 	allFlag := fs.Bool("all", false, "check all claims that have a checker_policy and CAS evidence")
 	evidenceFlag := fs.String("evidence", "", "only run checker for this specific evidence digest (single-evidence override)")
+	timeoutFlag := fs.Duration("timeout", 0, "per-checker wall-clock timeout (e.g. 20m); 0 = use runner default (5m)")
 	if err := fs.Parse(args); err != nil {
 		die(useJSON, errors.CodeInvalidInput, "check: "+err.Error())
 	}
@@ -50,7 +51,7 @@ func cmdCheck(args []string, useJSON bool) {
 	}
 
 	attestDir := filepath.Join(root, config.DirName, config.AttestDir)
-	nr := &runner.NativeRunner{ProjectRoot: root}
+	nr := &runner.NativeRunner{ProjectRoot: root, Timeout: *timeoutFlag}
 	pipe := &verify.Pipeline{
 		DAG:         g,
 		CAS:         store,
