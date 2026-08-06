@@ -6,6 +6,18 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.14] — 2026-08-06
+
+### Documentation
+
+- **CHANGELOG v0.3.12**: corrected stale claim that `MaxWallClock` was unchanged;
+  the 10m ceiling was raised to 60m in v0.3.13, making `--timeout 20m` effective.
+- **README + CLAUDE.md**: updated `replay-partial` file extension from `.json` to
+  `.debug` (changed in v0.3.10/B5); added `proofctl check --timeout` to the command
+  reference table with the correct 60m ceiling.
+
+---
+
 ## [v0.3.13] — 2026-08-06
 
 ### Fixed
