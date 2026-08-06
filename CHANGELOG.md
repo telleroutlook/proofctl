@@ -6,6 +6,18 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.13] — 2026-08-06
+
+### Fixed
+
+- **B10 follow-up — `MaxWallClock` raised from 10m to 60m**: The `--timeout` flag
+  added in v0.3.12 was silently capped at the old `MaxWallClock = 10m`, so
+  `--timeout 20m` had no effect. `MaxWallClock` is now 60m to accommodate checkers
+  that perform independent recomputation (archimedean even sector needs ~600s).
+  The default timeout (5m) is unchanged; only the ceiling changed.
+
+---
+
 ## [v0.3.12] — 2026-08-06
 
 ### Added

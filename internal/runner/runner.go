@@ -37,7 +37,7 @@ const (
 const (
 	MaxOutputBytes = 16 * 1024 * 1024 // 16 MB
 	MaxStderrBytes = 64 * 1024        // 64 KB
-	MaxWallClock   = 10 * time.Minute
+	MaxWallClock   = 60 * time.Minute
 )
 
 // RuntimeAssuranceDevelopmentUnisolated marks checkers run via NativeRunner.
