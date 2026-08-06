@@ -243,7 +243,7 @@ proofctl replay --dry-run \
 
 All evidence items must pass (digest match + checker exit 0) before a single
 `exact-replay` attestation is written to `.proofctl/attestations/<claim-id>-replay.json`.
-On partial failure, a debug record `<claim-id>-replay-partial.json` is written showing
+On partial failure, a debug record `<claim-id>-replay-partial.debug` is written showing
 which items passed.
 
 ## Status Display
@@ -269,6 +269,7 @@ proofctl check @<claim-id>                          # run checker against CAS ev
 proofctl check --all                                # run all claims with a checker_policy
 proofctl check --no-cache @<claim>                  # force re-run, skip cache
 proofctl check --evidence sha256:<d> @<claim>       # run checker for one evidence item only
+proofctl check --timeout 20m @<claim>               # override wall-clock limit (default 5m, max 60m)
 ```
 
 The `--evidence` flag is useful when a claim has multiple certs (e.g. odd + even sectors)

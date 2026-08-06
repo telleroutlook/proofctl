@@ -88,7 +88,7 @@ The v2 trusted kernel lives in `internal/kernel/`:
   writes `reproducible-computation` assurance instead of `exact-replay`
 - `--dry-run` flag: validates CAS state and generator syntax without executing;
   reports which evidence is missing from CAS and whether path_hint can auto-import
-- On partial failure, a debug record `<claim-id>-replay-partial.json` is written
+- On partial failure, a debug record `<claim-id>-replay-partial.debug` is written
   to `.proofctl/attestations/` showing per-evidence pass/fail with detailed reasons
 
 ## release conventions
@@ -142,6 +142,7 @@ The v2 trusted kernel lives in `internal/kernel/`:
   checker binary digest mismatch while still enforcing cryptographic attestation integrity
 - `proofctl verify` wires obligation IDs from ContractV2 JSON via `loadObligationIDs()`
 - multi-evidence: any per-evidence failure blocks the whole claim (INV-07)
+- `proofctl check --timeout <duration>` — override per-checker wall-clock limit (default 5m, ceiling 60m via `MaxWallClock`); useful for heavy checkers that recompute integrals (e.g. `--timeout 20m`)
 
 ## security invariant conventions
 

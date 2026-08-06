@@ -23,12 +23,11 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **`proofctl check --timeout <duration>`**: per-checker wall-clock timeout override.
-  The runner's default is 5 minutes and maximum is 10 minutes, which is insufficient
-  for checkers that independently recompute heavy integrals (e.g. the weil-first-prime
-  archimedean checker needs ~600 s for the even sector, exceeding the old 5 m default).
+  The runner's default is 5 minutes; the ceiling (`MaxWallClock`) was 10 minutes at
+  the time of this release but was raised to 60 minutes in v0.3.13.
   Usage: `proofctl check --timeout 20m @lem-o1b-even`
-  Zero (the default) preserves the existing 5 m default. The runner's 10 m MaxWallClock
-  cap is unchanged; values above it are silently clamped.
+  Zero (the default) preserves the existing 5 m default. Values above `MaxWallClock`
+  are clamped — see v0.3.13 for the raised ceiling.
 
 ### Known limitation
 
