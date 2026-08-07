@@ -724,3 +724,107 @@ func TestC10_SelfConsistencyExempt(t *testing.T) {
 		}
 	}
 }
+
+// ── C11: checker mutation coverage (honest-but-incomplete checker gap) ─────────
+
+func TestC11_NoMutationCoverage_Fail(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-07", EndFreshness: "2026-08-07",
+			ReplayMode: "from_scratch",
+			Metadata:   map[string]string{}, // no mutation evidence
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}, RequireCheckerMutationCoverage: true}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	var c11 *release.ConditionResult
+	for i := range results {
+		if results[i].ID == release.CondCheckerMutationCoverage {
+			c11 = &results[i]
+		}
+	}
+	if c11 == nil {
+		t.Fatal("C11 not evaluated when RequireCheckerMutationCoverage=true")
+	}
+	if c11.Passed {
+		t.Error("C11 must BLOCK an attestation with no mutation coverage evidence")
+	}
+}
+
+func TestC11_PartialKillRate_Fail(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-07", EndFreshness: "2026-08-07",
+			ReplayMode: "from_scratch",
+			Metadata:   map[string]string{"mutation_kill_rate": "90%", "mutation_catalog_digest": "sha256:cat"},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}, RequireCheckerMutationCoverage: true}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	for i := range results {
+		if results[i].ID == release.CondCheckerMutationCoverage && results[i].Passed {
+			t.Error("C11 must BLOCK a kill rate below 100%")
+		}
+	}
+}
+
+func TestC11_FullCoverage_Pass(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-07", EndFreshness: "2026-08-07",
+			ReplayMode: "from_scratch",
+			Metadata:   map[string]string{"mutation_kill_rate": "100%", "mutation_catalog_digest": "sha256:cat123"},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}, RequireCheckerMutationCoverage: true}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	for i := range results {
+		if results[i].ID == release.CondCheckerMutationCoverage && !results[i].Passed {
+			t.Errorf("C11 must PASS full coverage, got: %s", results[i].Blocker)
+		}
+	}
+}
+
+func TestC11_EmptyCatalogDigest_Fail(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-07", EndFreshness: "2026-08-07",
+			ReplayMode: "from_scratch",
+			Metadata:   map[string]string{"mutation_kill_rate": "100%", "mutation_catalog_digest": ""},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}, RequireCheckerMutationCoverage: true}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	for i := range results {
+		if results[i].ID == release.CondCheckerMutationCoverage && results[i].Passed {
+			t.Error("C11 must BLOCK 100%% kill rate with empty catalog digest (unauditable)")
+		}
+	}
+}
+
+func TestC11_NotActivatedWhenPolicyFalse(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-07", EndFreshness: "2026-08-07",
+			ReplayMode: "from_scratch",
+			Metadata:   map[string]string{},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	for i := range results {
+		if results[i].ID == release.CondCheckerMutationCoverage {
+			t.Error("C11 must not be evaluated when RequireCheckerMutationCoverage=false")
+		}
+	}
+}

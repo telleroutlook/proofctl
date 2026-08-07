@@ -6,6 +6,26 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.16] — 2026-08-07
+
+### Security
+
+- **C11 (checker mutation coverage)**: new release condition that BLOCKS any
+  attestation claiming substantive recomputation (`replay_mode=from_scratch` or
+  assurance `reproducible-computation`/`exact-replay`) unless it carries evidence
+  that its checker was run against a mutation catalog and rejected ALL mutants
+  (`mutation_kill_rate == "100%"` and a non-empty `mutation_catalog_digest`).
+  Closes the "honest but incomplete checker" gap that C10 cannot: a checker may
+  genuinely compute (not copy) yet omit an asserted term and still emit a false
+  pass. Pilot: the Weil FP-0.35 checker/generator twice omitted a second-moment
+  term (S_VV+S_VK+S_KV, then S^(2)), shrinking the residual and producing a
+  false-positive pivot — invisible to C10. Mutation coverage proves the checker
+  is actually sensitive to every term it asserts. Activated per-domain via
+  `"require_checker_mutation_coverage": true`. 5 new regression tests; full suite
+  green (37 pkgs).
+
+---
+
 ## [v0.3.15] — 2026-08-07
 
 ### Security

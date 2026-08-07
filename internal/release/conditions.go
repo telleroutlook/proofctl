@@ -29,6 +29,7 @@ const (
 	CondReplayMode               ConditionID = "C08-replay-mode"
 	CondNoNativeRuntime          ConditionID = "C09-no-native-runtime"
 	CondNoCopyOnlyGenerator      ConditionID = "C10-no-copy-only-generator"
+	CondCheckerMutationCoverage  ConditionID = "C11-checker-mutation-coverage"
 )
 
 // ConditionResult records whether one release condition passed.
@@ -76,6 +77,9 @@ func EvaluateConditions(
 	}
 	if pol.ForbidCopyOnlyGenerators {
 		results = append(results, checkC10NoCopyOnlyGenerator(attestations))
+	}
+	if pol.RequireCheckerMutationCoverage {
+		results = append(results, checkC11CheckerMutationCoverage(attestations))
 	}
 	for _, key := range pol.RequiredMetadataKeys {
 		results = append(results, checkMetadataKey(attestations, key))
@@ -554,3 +558,54 @@ func generatorIsCopyOnly(gen string) bool {
 // shutilImportRe strips "import shutil" (with optional aliases) so the generic
 // \bimport\b computation hint does not fire on a pure-copy generator.
 var shutilImportRe = regexp.MustCompile(`(?i)import\s+shutil\b`)
+
+// checkC11CheckerMutationCoverage enforces that every attestation claiming
+// substantive recomputation carries proof that its checker was run against a
+// mutation catalog and rejected ALL mutants. This closes the "honest but
+// incomplete checker" gap that C10 cannot: a checker may genuinely compute
+// (not copy) yet omit an asserted term and still emit a false pass.
+//
+// Discovered in the Weil FP-0.35 pilot: the certificate generator omitted the
+// V-self and prime-self second-moment terms (S_VV, S_VK, S_KV, then S^(2)),
+// shrinking the residual and producing a false-positive pivot. A checker that
+// recomputes but omits a term is invisible to C10. Mutation coverage proves the
+// checker is actually sensitive to every term it claims to verify: if flipping,
+// zeroing, or perturbing any asserted certificate field does NOT flip the
+// checker's verdict to fail, the checker is not really checking that field.
+//
+// Evidence required in attestation metadata:
+//   - "mutation_kill_rate" == "100%"  (every mutant rejected)
+//   - "mutation_catalog_digest"       (non-empty; pins WHICH mutants were run)
+//
+// The kill rate must be exactly "100%": a checker that lets any mutant survive
+// has a blind spot of the same class as the pilot defect.
+func checkC11CheckerMutationCoverage(attestations map[string]*ir.Attestation) ConditionResult {
+	var violations []string
+	for claimID, att := range attestations {
+		claimsRecompute := att.ReplayMode == "from_scratch" ||
+			att.Assurance == ir.AssuranceReproducibleComputation ||
+			att.Assurance == ir.AssuranceExactReplay
+		if !claimsRecompute {
+			continue
+		}
+		killRate := att.Metadata["mutation_kill_rate"]
+		catalogDigest := att.Metadata["mutation_catalog_digest"]
+		if killRate != "100%" {
+			violations = append(violations,
+				fmt.Sprintf("%s: mutation_kill_rate=%q (want \"100%%\")", claimID, killRate))
+			continue
+		}
+		if strings.TrimSpace(catalogDigest) == "" {
+			violations = append(violations,
+				fmt.Sprintf("%s: mutation_kill_rate is 100%% but mutation_catalog_digest is empty (cannot audit which mutants ran)", claimID))
+		}
+	}
+	if len(violations) > 0 {
+		return ConditionResult{
+			ID:      CondCheckerMutationCoverage,
+			Passed:  false,
+			Blocker: "C11: checker mutation coverage missing or incomplete: " + strings.Join(violations, "; "),
+		}
+	}
+	return ConditionResult{ID: CondCheckerMutationCoverage, Passed: true}
+}

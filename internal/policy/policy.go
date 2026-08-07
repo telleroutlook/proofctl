@@ -48,6 +48,17 @@ type ReleasePolicy struct {
 	// into place and self-attests as if recomputed from scratch (pilot: weil
 	// FP-0.35 certificate copied via shutil.copy but marked from_scratch).
 	ForbidCopyOnlyGenerators bool `json:"forbid_copy_only_generators,omitempty"`
+	// RequireCheckerMutationCoverage activates C11: every attestation that claims
+	// substantive recomputation (replay_mode==from_scratch or assurance
+	// reproducible-computation/exact-replay) must carry evidence that its checker
+	// was run against a mutation catalog and rejected ALL mutants
+	// (metadata mutation_kill_rate=="100%" and a non-empty mutation_catalog_digest).
+	// This closes the "honest but incomplete checker" gap: a checker that computes
+	// for real yet omits a term (e.g. a second-moment) can still emit a false pass;
+	// mutation coverage proves the checker is actually sensitive to every asserted
+	// term. Complements C10 (which only blocks copy-only generators). Pilot: the
+	// Weil FP-0.35 checker omitted S^(2)/S_VV terms and passed regardless.
+	RequireCheckerMutationCoverage bool `json:"require_checker_mutation_coverage,omitempty"`
 }
 
 // Evaluate checks that all required claims are accepted and exist in the graph.

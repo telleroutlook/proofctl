@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-proofctl is currently pre-release (`v0.3.15`). Security fixes are applied to the
+proofctl is currently pre-release (`v0.3.16`). Security fixes are applied to the
 `main` branch only; there are no backport guarantees until a stable release series
 is declared.
 
