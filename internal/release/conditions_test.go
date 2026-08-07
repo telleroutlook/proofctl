@@ -632,3 +632,95 @@ func TestC09_NoNativeRuntime_NotActivatedWhenPolicyEmpty(t *testing.T) {
 		}
 	}
 }
+
+// ── C10: no copy-only generator (Weil FP-0.35 pilot regression) ───────────────
+
+func TestC10_CopyOnlyGenerator_Fail(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-06", EndFreshness: "2026-08-06",
+			ReplayMode: "from_scratch",
+			Metadata: map[string]string{
+				"generator_cmds": "python3 -c \"import shutil; shutil.copy('certs/thm-fp-035.json', '{cert}')\"",
+			},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}, ForbidCopyOnlyGenerators: true}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	var c10 *release.ConditionResult
+	for i := range results {
+		if results[i].ID == release.CondNoCopyOnlyGenerator {
+			c10 = &results[i]
+		}
+	}
+	if c10 == nil {
+		t.Fatal("C10 not evaluated when ForbidCopyOnlyGenerators=true")
+	}
+	if c10.Passed {
+		t.Error("C10 must BLOCK a copy-only generator marked from_scratch (Weil FP-0.35 regression)")
+	}
+	if !strings.Contains(c10.Blocker, "copy-only") {
+		t.Errorf("blocker should mention copy-only, got: %s", c10.Blocker)
+	}
+}
+
+func TestC10_RealGenerator_Pass(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-06", EndFreshness: "2026-08-06",
+			ReplayMode: "from_scratch",
+			Metadata: map[string]string{
+				"generator_cmds": "python3 checker/fp035/recompute_schur.py --sector even --out {cert}",
+			},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}, ForbidCopyOnlyGenerators: true}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	for i := range results {
+		if results[i].ID == release.CondNoCopyOnlyGenerator && !results[i].Passed {
+			t.Errorf("C10 must PASS a genuine recomputation generator, got: %s", results[i].Blocker)
+		}
+	}
+}
+
+func TestC10_NotActivatedWhenPolicyFalse(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceReproducibleComputation,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-06", EndFreshness: "2026-08-06",
+			ReplayMode: "from_scratch",
+			Metadata:   map[string]string{"generator_cmds": "cp certs/x.json {cert}"},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"reproducible-computation"}}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	for i := range results {
+		if results[i].ID == release.CondNoCopyOnlyGenerator {
+			t.Error("C10 must not be evaluated when ForbidCopyOnlyGenerators=false")
+		}
+	}
+}
+
+func TestC10_SelfConsistencyExempt(t *testing.T) {
+	g := buildGraph("c1")
+	atts := map[string]*ir.Attestation{
+		"c1": {
+			ClaimID: "c1", Outcome: "accepted", Assurance: ir.AssuranceIndependentReview,
+			SelfDigest: "sha256:abc", StartFreshness: "2026-08-06", EndFreshness: "2026-08-06",
+			ReplayMode: "self_consistency",
+			Metadata:   map[string]string{"generator_cmds": "cp certs/x.json {cert}"},
+		},
+	}
+	pol := policy.ReleasePolicy{Version: "1", AllowedAssurances: []string{"independent-review"}, ForbidCopyOnlyGenerators: true}
+	results := release.EvaluateConditions(g, atts, pol, "")
+	for i := range results {
+		if results[i].ID == release.CondNoCopyOnlyGenerator && !results[i].Passed {
+			t.Errorf("C10 should exempt self_consistency attestations, got: %s", results[i].Blocker)
+		}
+	}
+}

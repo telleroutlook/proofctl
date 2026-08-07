@@ -6,6 +6,26 @@ proofctl uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.15] — 2026-08-07
+
+### Security
+
+- **C10 (no copy-only generator)**: new release condition that BLOCKS any
+  attestation which claims substantive recomputation (`replay_mode=from_scratch`
+  or assurance `reproducible-computation`/`exact-replay`) but whose
+  `generator_cmds` metadata is a pure file-copy (`shutil.copy`, `cp`, `cat`,
+  `ln`, ...). Closes a shell-game bypass discovered in the Weil FP-0.35 pilot:
+  the certificate `certs/thm-fp-035.json` was produced by
+  `python3 -c "shutil.copy(...)"` yet attested as `from_scratch` /
+  `reproducible-computation` — C08 only validated the replay_mode LABEL, not
+  whether the generator performed real computation. Activated per-domain via
+  `"forbid_copy_only_generators": true` in policy-v2.json (enabled for weil).
+  Conservative heuristic: fires only on unambiguous copy-only patterns; any
+  computation hint (import beyond shutil, check_/verify/integrate/schur/pivot/…)
+  exempts the generator. 4 new regression tests in internal/release.
+
+---
+
 ## [v0.3.14] — 2026-08-06
 
 ### Documentation

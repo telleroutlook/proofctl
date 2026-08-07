@@ -41,6 +41,13 @@ type ReleasePolicy struct {
 	// attestation contributing to release (INV-10). Typically ["native", "native-dev"].
 	// Use this to prevent development-only checker results from reaching a formal release.
 	ForbiddenRuntimes []string `json:"forbidden_runtimes,omitempty"`
+	// ForbidCopyOnlyGenerators activates C10: any attestation that claims
+	// substantive recomputation (replay_mode=="from_scratch") but whose
+	// generator_cmds metadata is a pure file-copy (shutil.copy, cp, ...) is
+	// rejected. This closes the shell-game bypass where a certificate is copied
+	// into place and self-attests as if recomputed from scratch (pilot: weil
+	// FP-0.35 certificate copied via shutil.copy but marked from_scratch).
+	ForbidCopyOnlyGenerators bool `json:"forbid_copy_only_generators,omitempty"`
 }
 
 // Evaluate checks that all required claims are accepted and exist in the graph.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -27,6 +28,7 @@ const (
 	CondConditionalMetadata      ConditionID = "C07-conditional-metadata"
 	CondReplayMode               ConditionID = "C08-replay-mode"
 	CondNoNativeRuntime          ConditionID = "C09-no-native-runtime"
+	CondNoCopyOnlyGenerator      ConditionID = "C10-no-copy-only-generator"
 )
 
 // ConditionResult records whether one release condition passed.
@@ -71,6 +73,9 @@ func EvaluateConditions(
 	}
 	if len(pol.ForbiddenRuntimes) > 0 {
 		results = append(results, checkC09NoNativeRuntime(attestations, pol.ForbiddenRuntimes))
+	}
+	if pol.ForbidCopyOnlyGenerators {
+		results = append(results, checkC10NoCopyOnlyGenerator(attestations))
 	}
 	for _, key := range pol.RequiredMetadataKeys {
 		results = append(results, checkMetadataKey(attestations, key))
@@ -467,3 +472,85 @@ func checkC09NoNativeRuntime(attestations map[string]*ir.Attestation, forbiddenK
 	}
 	return ConditionResult{ID: CondNoNativeRuntime, Passed: true}
 }
+
+// checkC10NoCopyOnlyGenerator enforces that an attestation claiming substantive
+// recomputation does not, in fact, merely copy a pre-existing certificate into
+// place. This closes a shell-game bypass discovered in the Weil FP-0.35 pilot:
+// the certificate was produced by `python3 -c "shutil.copy('certs/thm-fp-035.json', {cert})"`
+// yet the attestation was marked replay_mode="from_scratch" with
+// assurance="reproducible-computation". C08 only checks the replay_mode LABEL;
+// it does not inspect whether the generator command performs real computation.
+//
+// C10 inspects the generator_cmds metadata. If an attestation claims
+// from_scratch replay (or reproducible-computation / exact-replay assurance) but
+// every generator command is a pure file-copy / no-op, the release is blocked.
+//
+// A generator is considered "copy-only" if, after stripping the {cert}/{out}
+// placeholders, it contains a file-copy primitive (shutil.copy, shutil.copyfile,
+// cp, copy, cat, install, ln) and contains no evidence of computation (no module
+// import beyond shutil, no arithmetic entrypoint). The heuristic is deliberately
+// conservative: it only fires on unambiguous copy-only patterns, so legitimate
+// recomputation generators are never blocked.
+func checkC10NoCopyOnlyGenerator(attestations map[string]*ir.Attestation) ConditionResult {
+	var violations []string
+	for claimID, att := range attestations {
+		gen := att.Metadata["generator_cmds"]
+		if gen == "" {
+			continue // no generator recorded — other conditions govern this
+		}
+		// Only enforce when the attestation CLAIMS substantive recomputation.
+		claimsRecompute := att.ReplayMode == "from_scratch" ||
+			att.Assurance == ir.AssuranceReproducibleComputation ||
+			att.Assurance == ir.AssuranceExactReplay
+		if !claimsRecompute {
+			continue
+		}
+		if generatorIsCopyOnly(gen) {
+			violations = append(violations,
+				fmt.Sprintf("%s: generator is copy-only (%q) but attestation claims from-scratch recomputation",
+					claimID, gen))
+		}
+	}
+	if len(violations) > 0 {
+		return ConditionResult{
+			ID:      CondNoCopyOnlyGenerator,
+			Passed:  false,
+			Blocker: "C10: copy-only generator masquerading as recomputation: " + strings.Join(violations, "; "),
+		}
+	}
+	return ConditionResult{ID: CondNoCopyOnlyGenerator, Passed: true}
+}
+
+// copyPrimitiveRe matches unambiguous file-copy / no-op primitives.
+var copyPrimitiveRe = regexp.MustCompile(`(?i)(shutil\.copy|shutil\.copyfile|shutil\.copy2|shutil\.move|os\.link|os\.symlink|\bcp\b|\bcopy\b|\bcat\b|\binstall\b|\bln\b)`)
+
+// computationHintRe matches tokens indicating real computation beyond copying.
+// RE2 has no lookahead; we handle the "import shutil is not computation" case in
+// code by stripping shutil imports before matching.
+var computationHintRe = regexp.MustCompile(`(?i)(check_|verify|recompute|integrate|assemble|reconstruct|schur|eigen|eigval|pivot|ldlt|residual|\bimport\b)`)
+
+// generatorIsCopyOnly reports whether a "|"-joined generator command template
+// consists solely of file-copy / no-op operations with no sign of computation.
+func generatorIsCopyOnly(gen string) bool {
+	sawCopy := false
+	for _, part := range strings.Split(gen, "|") {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		// Neutralize a bare "import shutil" so it is not counted as computation:
+		// shutil is the copy library itself, not real work.
+		stripped := shutilImportRe.ReplaceAllString(p, "")
+		if computationHintRe.MatchString(stripped) {
+			return false
+		}
+		if copyPrimitiveRe.MatchString(p) {
+			sawCopy = true
+		}
+	}
+	return sawCopy
+}
+
+// shutilImportRe strips "import shutil" (with optional aliases) so the generic
+// \bimport\b computation hint does not fire on a pure-copy generator.
+var shutilImportRe = regexp.MustCompile(`(?i)import\s+shutil\b`)

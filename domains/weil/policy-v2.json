@@ -47,5 +47,6 @@
     "odd_sector_passes",
     "even_sector_passes",
     "pivot_radius_ratio"
-  ]
+  ],
+  "forbid_copy_only_generators": true
 }
