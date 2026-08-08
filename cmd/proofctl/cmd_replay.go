@@ -25,6 +25,19 @@ type multiFlag []string
 func (f *multiFlag) String() string     { return strings.Join(*f, ", ") }
 func (f *multiFlag) Set(v string) error { *f = append(*f, v); return nil }
 
+// coerceMetadataValue renders a JSON metadata value as a string. A JSON string
+// is returned unquoted; numbers, booleans, and any other scalar are returned as
+// their raw JSON text (e.g. 100 -> "100", true -> "true"). This lets checkers
+// emit non-string metadata without the whole metadata map (and the sibling
+// obligation_results) being silently dropped by a strict map[string]string.
+func coerceMetadataValue(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return strings.TrimSpace(string(raw))
+}
+
 // replayPair is one evidence/generator pair.
 type replayPair struct {
 	digest    string
@@ -331,7 +344,11 @@ func cmdReplay(args []string, useJSON bool) {
 					Verdict string `json:"verdict"`
 					Method  string `json:"method,omitempty"`
 				} `json:"obligation_results"`
-				Metadata map[string]string `json:"metadata,omitempty"`
+				// Decode metadata leniently: values may be strings, numbers, or
+				// booleans. A strict map[string]string here would make the WHOLE
+				// Unmarshal fail on a single non-string value, silently dropping
+				// obligation_results too. We coerce each value to a string below.
+				Metadata map[string]json.RawMessage `json:"metadata,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(res.checkerOutput), &out); err == nil {
 				for _, r := range out.ObligationResults {
@@ -341,9 +358,14 @@ func cmdReplay(args []string, useJSON bool) {
 						Method:  r.Method,
 					})
 				}
-				for k, v := range out.Metadata {
-					checkerMetadata[k] = v
+				for k, raw := range out.Metadata {
+					checkerMetadata[k] = coerceMetadataValue(raw)
 				}
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"warn: replay: checker output for %s is not valid JSON; "+
+						"obligation_results and metadata dropped: %v\n",
+					*claimIDFlag, err)
 			}
 		}
 	}
